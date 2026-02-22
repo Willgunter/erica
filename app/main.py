@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from typing import Any
 
 from app.web import Flask, jsonify, render_template, request
+from dotenv import load_dotenv
 
 from app.lesson_engine.media import MediaGenerator
 from app.lesson_engine.planner import LessonPlanner
@@ -26,6 +28,18 @@ from app.services.summary_service import (
 )
 from app.services.test_service import create_test_session, submit_test_answers
 from app.store import store
+
+
+def _load_local_env_files() -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    for env_name in (".env.local", ".env"):
+        env_path = project_root / env_name
+        if env_path.exists():
+            # Keep explicitly exported shell variables as the highest precedence.
+            load_dotenv(env_path, override=False)
+
+
+_load_local_env_files()
 
 
 def _create_service() -> LessonGenerationService:
@@ -142,7 +156,8 @@ def create_app() -> Flask:
             if not isinstance(answers, list):
                 return jsonify({"error": "answers must be an array"}), 400
 
-            updated = record_checkpoint_answers(session=session, answers=answers)
+            updated, answer_results = record_checkpoint_answers(session=session, answers=answers)
+            latest_answer_result = answer_results[-1] if answer_results else {}
             
             ai_response = None
             if answers and len(answers) > 0:
@@ -176,6 +191,8 @@ def create_app() -> Flask:
                     "qa_pairs": updated["qa_pairs"],
                     "remaining_question_ids": remaining_question_ids(updated),
                     "ai_feedback": ai_response,
+                    "is_correct": latest_answer_result.get("is_correct"),
+                    "answer_hint": latest_answer_result.get("hint"),
                 }
             )
 

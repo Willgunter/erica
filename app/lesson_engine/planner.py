@@ -34,6 +34,76 @@ def _estimate_minutes(chunk_count: int, pacing: str) -> int:
     return max(5, round(base * factor))
 
 
+def _parse_json_object(raw: str) -> dict[str, Any] | None:
+    candidates = [raw.strip()]
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        candidates.append(raw[start : end + 1].strip())
+
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return None
+
+
+def _as_string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
+def _normalize_modules(raw_modules: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw_modules, list):
+        return []
+
+    normalized: list[dict[str, Any]] = []
+    for item in raw_modules:
+        if not isinstance(item, dict):
+            continue
+
+        title = str(item.get("title") or "").strip() or "Untitled Module"
+        concept_explanation = str(item.get("concept_explanation") or item.get("explanation") or "").strip()
+        key_insight = str(item.get("key_insight") or "").strip()
+
+        flashcards: list[dict[str, str]] = []
+        for card in item.get("flashcards") or []:
+            if not isinstance(card, dict):
+                continue
+            front = str(card.get("front") or card.get("question") or card.get("term") or "").strip()
+            back = str(card.get("back") or card.get("answer") or card.get("definition") or "").strip()
+            if front and back:
+                flashcards.append({"front": front, "back": back})
+
+        exam_questions: list[dict[str, Any]] = []
+        for question in item.get("exam_questions") or []:
+            if not isinstance(question, dict):
+                continue
+            q = str(question.get("question") or "").strip()
+            a = str(question.get("answer") or "").strip()
+            hints = _as_string_list(question.get("hints"))
+            if q and a:
+                exam_questions.append({"question": q, "answer": a, "hints": hints[:3]})
+
+        normalized.append(
+            {
+                "title": title,
+                "concept_explanation": concept_explanation,
+                "key_insight": key_insight,
+                "flashcards": flashcards[:7],
+                "exam_questions": exam_questions[:3],
+            }
+        )
+
+    return normalized
+
+
 def _init_gemini():
     try:
         import google.generativeai as genai
@@ -140,8 +210,8 @@ Return ONLY valid JSON with NO markdown fences, NO extra text:
             elif "```" in text:
                 text = text.split("```")[1].split("```")[0].strip()
 
-            parsed = json.loads(text)
-            modules = parsed.get("modules", [])
+            parsed = _parse_json_object(text)
+            modules = _normalize_modules((parsed or {}).get("modules"))
             if modules:
                 _logger.info("[Planner] Gemini returned %d modules for subject=%s", len(modules), profile.subject)
                 for i, mod in enumerate(modules, 1):

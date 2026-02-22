@@ -2,14 +2,27 @@ from __future__ import annotations
 
 import os
 import uuid
+from pathlib import Path
 
 from app.web import Flask, jsonify, redirect, render_template, request
+from dotenv import load_dotenv
 
 from .config import ALLOWED_FILE_TYPES, Config
 from .db import Database
 from .parsers import ParseError, parse_source
 from .queueing import QueueManager
 from .storage import StorageError, build_storage
+
+
+def _load_local_env_files() -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    for env_name in (".env.local", ".env"):
+        env_path = project_root / env_name
+        if env_path.exists():
+            load_dotenv(env_path, override=False)
+
+
+_load_local_env_files()
 
 
 def _extension(filename: str) -> str:

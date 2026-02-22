@@ -137,6 +137,8 @@ export function KnowledgeCheck({
 
     try {
       let aiResponse: string | null = null;
+      let isCorrect: boolean | null = null;
+      let answerHint: string | null = null;
       let completed = false;
       let remainingIds: string[] = [];
 
@@ -153,22 +155,33 @@ export function KnowledgeCheck({
         });
         const data = await res.json();
         aiResponse = data.ai_feedback || null;
+        isCorrect = typeof data.is_correct === "boolean" ? data.is_correct : null;
+        answerHint = typeof data.answer_hint === "string" && data.answer_hint.trim().length > 0 ? data.answer_hint : null;
         completed = data.completed || false;
         remainingIds = data.remaining_question_ids || [];
       }
 
+      const shouldAdvance = isCorrect !== false;
       const nextIndex = currentQuestionIndex + 1;
       const hasMore = nextIndex < sessionQuestions.length;
 
-      if (aiResponse) {
-        addMessage("erica", aiResponse);
+      if (shouldAdvance) {
+        if (aiResponse) {
+          addMessage("erica", aiResponse);
+        } else {
+          const genericResponses = [
+            `That's a solid attempt! ${hasMore ? "Let's keep going." : "You've worked through all the questions!"}`,
+            `Good thinking — keep building on that. ${hasMore ? "Ready for the next one?" : ""}`,
+            `I like your reasoning. ${hasMore ? "Moving on..." : "We're done — great work!"}`,
+          ];
+          addMessage("erica", genericResponses[currentQuestionIndex % genericResponses.length]);
+        }
       } else {
-        const genericResponses = [
-          `That's a solid attempt! ${hasMore ? "Let's keep going." : "You've worked through all the questions!"}`,
-          `Good thinking — keep building on that. ${hasMore ? "Ready for the next one?" : ""}`,
-          `I like your reasoning. ${hasMore ? "Moving on..." : "We're done — great work!"}`,
-        ];
-        addMessage("erica", genericResponses[currentQuestionIndex % genericResponses.length]);
+        const fallbackHint = answerHint || currentQuestion?.hints?.[0] || "Try connecting your answer to the key idea and include an example.";
+        const retryMessage = aiResponse ?? "You're close, but let's try a bit deeper.";
+        addMessage("erica", `${retryMessage}\n\n💡 Hint: ${fallbackHint}`);
+        setShowHint(true);
+        return;
       }
 
       if (completed || (!hasMore && remainingIds.length === 0)) {
@@ -188,16 +201,7 @@ export function KnowledgeCheck({
         }, 1200);
       }
     } catch {
-      addMessage("erica", "Let's keep going — what are your thoughts on that?");
-      const nextIndex = currentQuestionIndex + 1;
-      if (nextIndex < sessionQuestions.length) {
-        setCurrentQuestionIndex(nextIndex);
-        setTimeout(() => {
-          addMessage("erica", `**Question ${nextIndex + 1}/${sessionQuestions.length}:** ${sessionQuestions[nextIndex].text}`);
-        }, 1400);
-      } else {
-        setIsCompleted(true);
-      }
+      addMessage("erica", "I couldn't check that just now. Let's try that answer again.");
     } finally {
       setIsLoading(false);
     }
@@ -257,7 +261,7 @@ export function KnowledgeCheck({
         <div className="sparring-info">
           <p className="info-heading">How Erica spars</p>
           <p className="info-text">
-            She asks questions from your actual material. Think out loud — uncertainty is fine. She guides, not grades.
+            She asks questions from your actual material, checks each answer, and gives you hints to tighten your understanding.
           </p>
         </div>
 

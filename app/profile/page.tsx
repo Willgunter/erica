@@ -53,7 +53,6 @@ type FormatStat = {
 
 const QUIZ_SUMMARY_STORAGE_KEY = "erica_latest_quiz_summary";
 const LESSON_HISTORY_STORAGE_KEY = "erica_profile_lesson_history";
-
 const BASE_LESSONS: LessonOverview[] = [
   {
     id: "lesson-physics-101",

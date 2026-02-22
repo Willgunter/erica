@@ -1,13 +1,13 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
+from typing import Any
 from uuid import uuid4
 
 from app.store import store
 from app.templates.prompts import CHECKPOINT_SYSTEM_PROMPT
-from app.services.ai_sparring_service import AISparringPartner
-
-_ai_sparring = AISparringPartner()
 
 
 def _now_iso() -> str:
@@ -39,6 +39,58 @@ def _build_guided_question(topic: str, index: int) -> str:
         "Where do you still feel uncertain about {topic}?",
     ]
     return templates[index].format(topic=topic)
+
+
+def _normalize_text(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    text = re.sub(r"[^a-z0-9\s']", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _extract_hint(question: dict) -> str:
+    hints = question.get("hints") or []
+    normalized_hints = [str(hint).strip() for hint in hints if str(hint).strip()]
+    if normalized_hints:
+        return normalized_hints[0]
+
+    answer = _normalize_text(question.get("answer", ""))
+    if not answer:
+        return "Focus on the key ideas from the material and explain your reasoning."
+
+    answer_parts = answer.split()
+    clue_words = ", ".join(answer_parts[:6])
+    return f"Try mentioning: {clue_words}"
+
+
+def _is_answer_correct(question: dict, student_answer: str) -> tuple[bool, str]:
+    expected = _normalize_text(question.get("answer", ""))
+    if not expected:
+        # No canonical answer available, so keep the flow open-ended for this checkpoint question.
+        return True, ""
+
+    normalized_student = _normalize_text(student_answer)
+    if not normalized_student:
+        return False, _extract_hint(question)
+
+    if normalized_student in expected or expected in normalized_student:
+        return True, ""
+
+    expected_tokens = {token for token in expected.split() if len(token) > 2}
+    student_tokens = {token for token in normalized_student.split() if len(token) > 2}
+    if not expected_tokens:
+        return False, _extract_hint(question)
+
+    matched_tokens = expected_tokens.intersection(student_tokens)
+    min_matches = max(1, int(len(expected_tokens) * 0.6))
+    if len(matched_tokens) >= min_matches:
+        return True, ""
+
+    similarity = SequenceMatcher(None, expected, normalized_student).ratio()
+    if similarity >= 0.72:
+        return True, ""
+
+    return False, _extract_hint(question)
 
 
 def create_checkpoint_session(
@@ -92,10 +144,13 @@ def create_checkpoint_session(
     return session
 
 
-def record_checkpoint_answers(session: dict, answers: list[dict]) -> dict:
+def record_checkpoint_answers(session: dict, answers: list[dict]) -> tuple[dict, list[dict[str, Any]]]:
     questions_by_id = {question["id"]: question for question in session["questions"]}
-    existing_question_ids = {pair["question_id"] for pair in session["qa_pairs"]}
+    qa_pairs_by_id: dict[str, int] = {
+        pair["question_id"]: index for index, pair in enumerate(session["qa_pairs"])
+    }
 
+    answer_results: list[dict[str, Any]] = []
     for answer in answers:
         question_id = answer.get("question_id")
         learner_answer = str(answer.get("answer", "")).strip()
@@ -103,25 +158,66 @@ def record_checkpoint_answers(session: dict, answers: list[dict]) -> dict:
             continue
         if not learner_answer:
             continue
-        if question_id in existing_question_ids:
-            continue
-        session["qa_pairs"].append(
+
+        existing_index = qa_pairs_by_id.get(question_id)
+        question = questions_by_id[question_id]
+        is_correct, hint = _is_answer_correct(question, learner_answer)
+        if existing_index is not None:
+            existing_pair = session["qa_pairs"][existing_index]
+            if existing_pair.get("is_correct"):
+                continue
+            existing_pair.update(
+                {
+                    "question": question["text"],
+                    "answer": learner_answer,
+                    "is_correct": is_correct,
+                    "hint": hint,
+                    "attempts": existing_pair.get("attempts", 0) + 1,
+                    "attempted_at": _now_iso(),
+                }
+            )
+        else:
+            qa_pairs_by_id[question_id] = len(session["qa_pairs"])
+            session["qa_pairs"].append(
+                {
+                    "question_id": question_id,
+                    "question": question["text"],
+                    "answer": learner_answer,
+                    "is_correct": is_correct,
+                    "hint": hint,
+                    "attempts": 1,
+                    "attempted_at": _now_iso(),
+                }
+            )
+
+        answer_results.append(
             {
                 "question_id": question_id,
-                "question": questions_by_id[question_id]["text"],
+                "is_correct": is_correct,
+                "hint": hint,
                 "answer": learner_answer,
             }
         )
-        existing_question_ids.add(question_id)
 
-    session["completed"] = len(session["qa_pairs"]) >= len(session["questions"])
+    completed = all(
+        any(
+            pair.get("question_id") == question["id"] and pair.get("is_correct")
+            for pair in session["qa_pairs"]
+        )
+        for question in session["questions"]
+    )
+    session["completed"] = completed
     session["updated_at"] = _now_iso()
 
     with store.lock:
         store.checkpoint_sessions[session["session_id"]] = session
-    return session
+    return session, answer_results
 
 
 def remaining_question_ids(session: dict) -> list[str]:
-    answered = {pair["question_id"] for pair in session["qa_pairs"]}
+    answered = {
+        pair["question_id"]
+        for pair in session["qa_pairs"]
+        if pair.get("is_correct")
+    }
     return [q["id"] for q in session["questions"] if q["id"] not in answered]

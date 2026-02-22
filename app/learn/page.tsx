@@ -61,6 +61,9 @@ type Profile = {
   };
 };
 
+const SUPABASE_TOKEN_STORAGE_KEY = "supabaseAccessToken";
+const DEV_USER_ID_STORAGE_KEY = "supabaseDevUserId";
+
 function getTrackConfig(track: PracticeTrack): TrackConfig {
   return TRACK_CONFIGS.find((item) => item.track === track) ?? TRACK_CONFIGS[2];
 }
@@ -418,8 +421,9 @@ export default function LearnPage() {
         return;
       }
 
-      const data = await response.json();
+      const data = (await response.json()) as Lesson;
       setLesson(data);
+
       if (data.status === "completed" || (data.modules && data.modules.length > 0)) {
         setStatus("ready");
       } else if (data.status === "failed") {
