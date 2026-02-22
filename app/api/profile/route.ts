@@ -44,6 +44,8 @@ function isMissingProfileSchema(errorMessage: string | undefined): boolean {
   return (
     lowered.includes("could not find the table 'public.profiles'") ||
     lowered.includes("could not find the table 'public.learning_preferences'") ||
+    lowered.includes("relation") && (lowered.includes("profiles") || lowered.includes("learning_preferences")) ||
+    lowered.includes("does not exist") ||
     (lowered.includes("schema cache") && (lowered.includes("profiles") || lowered.includes("learning_preferences")))
   );
 }
@@ -154,8 +156,11 @@ export async function POST(request: Request) {
     ...normalized
   };
 
+  console.log("[POST /api/profile] Saving profile for user:", resolvedUser.userId);
+
   const useDevFallback = process.env.NODE_ENV !== "production" && !accessToken && Boolean(devUserId);
   if (useDevFallback) {
+    console.log("[POST /api/profile] Using dev fallback mode");
     const ensureUserError = await ensureDevAuthUserExists(resolvedUser.userId);
     if (ensureUserError) {
       return NextResponse.json({ error: ensureUserError.error }, { status: ensureUserError.status });
@@ -236,8 +241,11 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: resolvedUser.error }, { status: resolvedUser.status });
   }
 
-  const useDevFallback = process.env.NODE_ENV !== "production" && !accessToken && Boolean(devUserId);
+  console.log("[GET /api/profile] Fetching profile for user:", resolvedUser.userId);
+
+  const useDevFallback = process.env.NODE_ENV !== "production" && Boolean(devUserId);
   if (useDevFallback) {
+    console.log("[GET /api/profile] Using dev fallback mode (service client)");
     const ensureUserError = await ensureDevAuthUserExists(resolvedUser.userId);
     if (ensureUserError) {
       return NextResponse.json({ error: ensureUserError.error }, { status: ensureUserError.status });
@@ -260,18 +268,19 @@ export async function GET(request: Request) {
 
   if (profileError || preferenceError) {
     const maybeMissingSchemaMessage = profileError?.message ?? preferenceError?.message;
-    if (process.env.NODE_ENV !== "production" && isMissingProfileSchema(maybeMissingSchemaMessage)) {
+    console.log("[GET /api/profile] Supabase error:", maybeMissingSchemaMessage);
+    
+    if (process.env.NODE_ENV !== "production") {
+      console.log("[GET /api/profile] Attempting dev fallback for user:", resolvedUser.userId);
       try {
         const devProfile = await getDevProfile(resolvedUser.userId);
         if (devProfile) {
+          console.log("[GET /api/profile] Found dev profile");
           return NextResponse.json({ profile: devProfile }, { status: 200 });
         }
-        return NextResponse.json({ error: "Profile not found" }, { status: 404 });
+        console.log("[GET /api/profile] No dev profile found");
       } catch (storeError) {
-        return NextResponse.json(
-          { error: `Supabase schema missing and local fallback failed: ${(storeError as Error).message}` },
-          { status: 500 }
-        );
+        console.error("[GET /api/profile] Dev fallback error:", storeError);
       }
     }
 
@@ -283,16 +292,9 @@ export async function GET(request: Request) {
 
   if (!profileData || !preferenceData) {
     if (process.env.NODE_ENV !== "production") {
-      try {
-        const devProfile = await getDevProfile(resolvedUser.userId);
-        if (devProfile) {
-          return NextResponse.json({ profile: devProfile }, { status: 200 });
-        }
-      } catch (storeError) {
-        return NextResponse.json(
-          { error: `Could not read local fallback profile: ${(storeError as Error).message}` },
-          { status: 500 }
-        );
+      const devProfile = await getDevProfile(resolvedUser.userId);
+      if (devProfile) {
+        return NextResponse.json({ profile: devProfile }, { status: 200 });
       }
     }
 

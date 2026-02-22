@@ -7,6 +7,7 @@ from app.web import Flask, jsonify, redirect, render_template, request
 
 from .config import ALLOWED_FILE_TYPES, Config
 from .db import Database
+from .parsers import ParseError, parse_source
 from .queueing import QueueManager
 from .storage import StorageError, build_storage
 
@@ -33,6 +34,45 @@ def create_app() -> Flask:
     @app.get("/ingest")
     def ingest_ui():
         return render_template("ingest.html")
+
+    @app.post("/api/parse")
+    def parse():
+        if "file" not in request.files:
+            return jsonify({"error": "No file provided"}), 400
+
+        file = request.files["file"]
+        if not file.filename:
+            return jsonify({"error": "Missing filename"}), 400
+
+        source_type = _extension(file.filename)
+        if source_type not in ALLOWED_FILE_TYPES:
+            return (
+                jsonify(
+                    {
+                        "error": f"Unsupported file type '{source_type}'. Allowed: {sorted(ALLOWED_FILE_TYPES)}"
+                    }
+                ),
+                400,
+            )
+
+        try:
+            payload = file.read()
+            chunks = parse_source(payload, source_type)
+            
+            return jsonify({
+                "chunks": [
+                    {
+                        "id": f"chunk-{i}",
+                        "text": chunk["text"],
+                        "metadata": chunk.get("metadata", {})
+                    }
+                    for i, chunk in enumerate(chunks)
+                ]
+            })
+        except ParseError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            return jsonify({"error": f"Failed to parse file: {str(exc)}"}), 500
 
     @app.post("/api/ingest")
     def ingest():

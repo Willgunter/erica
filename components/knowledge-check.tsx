@@ -1,64 +1,75 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 
-type Checkpoint = {
-  checkpoint_id: string;
-  module_id: string;
-  marker: string;
-  questions: string[];
-};
-
-type Module = {
-  module_id: string;
-  title: string;
-};
-
-type Lesson = {
-  id: string;
-};
-
-type Message = {
+interface Message {
   id: string;
   role: "erica" | "user";
   content: string;
-  timestamp: number;
-};
+  timestamp: Date;
+}
 
-type KnowledgeCheckProps = {
-  lesson: Lesson;
-  module: Module;
-  checkpoint: Checkpoint;
+interface SessionQuestion {
+  id: string;
+  text: string;
+  answer?: string;
+  hints?: string[];
+}
+
+interface KnowledgeCheckProps {
+  lesson: { id: string };
+  module: {
+    module_id: string;
+    title: string;
+    objective: string;
+  };
+  checkpoint: {
+    checkpoint_id: string;
+    questions: string[];
+  };
   onComplete: (sessionId: string) => void;
-  progress: number;
-  moduleNumber: number;
-  totalModules: number;
-};
+}
 
 export function KnowledgeCheck({
   lesson,
   module,
   checkpoint,
   onComplete,
-  progress,
-  moduleNumber,
-  totalModules
 }: KnowledgeCheckProps) {
-  const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [userInput, setUserInput] = useState("");
+  const [inputValue, setInputValue] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessionQuestions, setSessionQuestions] = useState<SessionQuestion[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [isComplete, setIsComplete] = useState(false);
+  const [isCompleted, setIsCompleted] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(true);
+  const [showHint, setShowHint] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const initialized = useRef(false);
 
-  useEffect(() => {
-    initializeCheckpoint();
+  const addMessage = useCallback((role: "erica" | "user", content: string) => {
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `msg-${Date.now()}-${Math.random()}`,
+        role,
+        content,
+        timestamp: new Date(),
+      },
+    ]);
   }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  useEffect(() => {
+    if (initialized.current) return;
+    initialized.current = true;
+    initializeCheckpoint();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const initializeCheckpoint = async () => {
     try {
@@ -67,269 +78,287 @@ export function KnowledgeCheck({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           lesson: { id: lesson.id },
-          module_id: module.module_id
-        })
+          module_id: module.module_id,
+        }),
       });
 
-      if (!response.ok) {
-        throw new Error("Failed to start knowledge check");
+      const data = await response.json();
+      setIsInitializing(false);
+
+      if (!response.ok || !data.session_id) {
+        const fallbackQs: SessionQuestion[] = checkpoint.questions.map((q) => ({
+          id: `fallback-${Math.random()}`,
+          text: q,
+        }));
+        setSessionQuestions(fallbackQs);
+        addMessage("erica", `Hey! Let's spar on **${module.title}**. I'll ask you questions from your material — think out loud, I'm here to guide you, not grade you. 🧠`);
+        setTimeout(() => addMessage("erica", `**Question 1/${fallbackQs.length}:** ${fallbackQs[0]?.text}`), 800);
+        return;
       }
 
-      const data = await response.json();
+      const questions: SessionQuestion[] = data.questions || [];
       setSessionId(data.session_id);
+      setSessionQuestions(questions);
 
-      const welcomeMessage: Message = {
-        id: crypto.randomUUID(),
-        role: "erica",
-        content: `Great work on completing "${module.title}"! Let's reinforce what you learned with a quick knowledge check. I'm here to guide you, not quiz you. Take your time and explain your thinking.`,
-        timestamp: Date.now()
-      };
+      addMessage("erica", `Hey! Let's spar on **${module.title}**. I'll ask you questions directly from your practice material — think out loud, I'm here to guide you, not grade you. 🧠`);
 
-      setMessages([welcomeMessage]);
-      
-      setTimeout(() => {
-        askQuestion(0);
-      }, 1500);
-    } catch (err) {
-      console.error("Checkpoint initialization error:", err);
+      if (questions.length > 0) {
+        setTimeout(() => {
+          addMessage("erica", `**Question 1/${questions.length}:** ${questions[0].text}`);
+        }, 800);
+      }
+    } catch {
+      setIsInitializing(false);
+      const fallbackQs: SessionQuestion[] = checkpoint.questions.map((q) => ({
+        id: `fallback-${Math.random()}`,
+        text: q,
+      }));
+      setSessionQuestions(fallbackQs);
+      addMessage("erica", `Let's get started on **${module.title}**!`);
+      setTimeout(() => addMessage("erica", `**Question 1/${fallbackQs.length}:** ${fallbackQs[0]?.text}`), 800);
     }
-  };
-
-  const askQuestion = (questionIdx: number) => {
-    if (questionIdx >= checkpoint.questions.length) {
-      handleCheckpointComplete();
-      return;
-    }
-
-    const questionMessage: Message = {
-      id: crypto.randomUUID(),
-      role: "erica",
-      content: checkpoint.questions[questionIdx],
-      timestamp: Date.now()
-    };
-
-    setMessages((prev) => [...prev, questionMessage]);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!userInput.trim() || !sessionId || isProcessing) return;
+    const trimmed = inputValue.trim();
+    if (!trimmed || isLoading) return;
 
-    const userMessage: Message = {
-      id: crypto.randomUUID(),
-      role: "user",
-      content: userInput.trim(),
-      timestamp: Date.now()
-    };
+    setInputValue("");
+    setShowHint(false);
+    addMessage("user", trimmed);
+    setIsLoading(true);
 
-    setMessages((prev) => [...prev, userMessage]);
-    setUserInput("");
-    setIsProcessing(true);
+    const currentQuestion = sessionQuestions[currentQuestionIndex];
 
     try {
-      const response = await fetch("/api/checkpoint", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          session_id: sessionId,
-          answers: [
-            {
-              question_id: `q${currentQuestionIndex}`,
-              answer: userMessage.content
-            }
-          ]
-        })
-      });
+      let aiResponse: string | null = null;
+      let completed = false;
+      let remainingIds: string[] = [];
 
-      if (!response.ok) {
-        throw new Error("Failed to submit answer");
+      if (sessionId && currentQuestion && !currentQuestion.id.startsWith("fallback-")) {
+        const res = await fetch("/api/checkpoint", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            session_id: sessionId,
+            lesson: { id: lesson.id },
+            module_id: module.module_id,
+            answers: [{ question_id: currentQuestion.id, answer: trimmed }],
+          }),
+        });
+        const data = await res.json();
+        aiResponse = data.ai_feedback || null;
+        completed = data.completed || false;
+        remainingIds = data.remaining_question_ids || [];
       }
 
-      const data = await response.json();
+      const nextIndex = currentQuestionIndex + 1;
+      const hasMore = nextIndex < sessionQuestions.length;
 
-      setTimeout(() => {
-        const feedback = generateFeedback(userMessage.content, currentQuestionIndex);
-        const feedbackMessage: Message = {
-          id: crypto.randomUUID(),
-          role: "erica",
-          content: feedback,
-          timestamp: Date.now()
-        };
+      if (aiResponse) {
+        addMessage("erica", aiResponse);
+      } else {
+        const genericResponses = [
+          `That's a solid attempt! ${hasMore ? "Let's keep going." : "You've worked through all the questions!"}`,
+          `Good thinking — keep building on that. ${hasMore ? "Ready for the next one?" : ""}`,
+          `I like your reasoning. ${hasMore ? "Moving on..." : "We're done — great work!"}`,
+        ];
+        addMessage("erica", genericResponses[currentQuestionIndex % genericResponses.length]);
+      }
 
-        setMessages((prev) => [...prev, feedbackMessage]);
-
+      if (completed || (!hasMore && remainingIds.length === 0)) {
         setTimeout(() => {
-          const nextIdx = currentQuestionIndex + 1;
-          setCurrentQuestionIndex(nextIdx);
-          askQuestion(nextIdx);
+          setIsCompleted(true);
+          addMessage("erica", `🌟 **Excellent!** You've completed the knowledge check for **${module.title}**. Your engagement shows real understanding — you're ready to move on!`);
         }, 1200);
-      }, 800);
-    } catch (err) {
-      console.error("Answer submission error:", err);
+      } else if (hasMore) {
+        setCurrentQuestionIndex(nextIndex);
+        setTimeout(() => {
+          addMessage("erica", `**Question ${nextIndex + 1}/${sessionQuestions.length}:** ${sessionQuestions[nextIndex].text}`);
+        }, 1400);
+      } else {
+        setTimeout(() => {
+          setIsCompleted(true);
+          addMessage("erica", `🌟 **Excellent!** You've completed the knowledge check for **${module.title}**!`);
+        }, 1200);
+      }
+    } catch {
+      addMessage("erica", "Let's keep going — what are your thoughts on that?");
+      const nextIndex = currentQuestionIndex + 1;
+      if (nextIndex < sessionQuestions.length) {
+        setCurrentQuestionIndex(nextIndex);
+        setTimeout(() => {
+          addMessage("erica", `**Question ${nextIndex + 1}/${sessionQuestions.length}:** ${sessionQuestions[nextIndex].text}`);
+        }, 1400);
+      } else {
+        setIsCompleted(true);
+      }
     } finally {
-      setIsProcessing(false);
+      setIsLoading(false);
     }
   };
 
-  const generateFeedback = (answer: string, questionIdx: number): string => {
-    const feedbacks = [
-      [
-        "Good start! I can see you're connecting the concepts. Let me help you dig a bit deeper.",
-        "Nice explanation! You're on the right track. Can you expand on that a little more?",
-        "That's a solid understanding. Let's make sure we connect this to the bigger picture."
-      ],
-      [
-        "Excellent thinking! You're applying what you learned really well.",
-        "I like how you're connecting this back to your goals. Keep that up!",
-        "Great job relating this to practical use. That's exactly what we want."
-      ],
-      [
-        "That's okay - it's normal to have some uncertainty. Let's talk through it.",
-        "I appreciate your honesty. Understanding what you don't know is just as important.",
-        "Good awareness! Recognizing areas to revisit is a key part of learning."
-      ]
-    ];
+  const currentQuestion = sessionQuestions[currentQuestionIndex];
+  const progress = sessionQuestions.length > 0
+    ? (currentQuestionIndex / sessionQuestions.length) * 100
+    : 0;
 
-    const feedbackSet = feedbacks[questionIdx] || feedbacks[0];
-    return feedbackSet[Math.floor(Math.random() * feedbackSet.length)];
-  };
-
-  const handleCheckpointComplete = () => {
-    const completionMessage: Message = {
-      id: crypto.randomUUID(),
-      role: "erica",
-      content: `Fantastic work! You've completed the knowledge check for this module. You're making real progress. Ready to move on?`,
-      timestamp: Date.now()
-    };
-
-    setMessages((prev) => [...prev, completionMessage]);
-    setIsComplete(true);
-  };
-
-  const handleContinue = () => {
-    if (sessionId) {
-      onComplete(sessionId);
-    }
-  };
+  if (isInitializing) {
+    return (
+      <div className="knowledge-check-container">
+        <div className="lesson-sidebar">
+          <div className="sidebar-header">
+            <h2 className="sidebar-title">AI Sparring</h2>
+          </div>
+        </div>
+        <div className="lesson-content">
+          <div className="loading-state">
+            <div className="spinner" />
+            <p style={{ marginTop: "1rem", color: "var(--ink-soft)" }}>Preparing your sparring session…</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <main className="knowledge-check-container">
-      <aside className="lesson-sidebar">
+    <div className="knowledge-check-container">
+      <div className="lesson-sidebar">
         <div className="sidebar-header">
-          <h2 className="sidebar-title">Knowledge Check</h2>
-          <p className="sidebar-subtitle">
-            Module {moduleNumber} of {totalModules}
-          </p>
+          <h2 className="sidebar-title">🥊 AI Spar</h2>
+          <p className="sidebar-subtitle">Socratic Learning</p>
         </div>
 
-        <div className="check-progress">
-          <div className="progress-circle">
-            <svg width="120" height="120">
-              <circle
-                cx="60"
-                cy="60"
-                r="50"
-                fill="none"
-                stroke="var(--line)"
-                strokeWidth="8"
-              />
-              <circle
-                cx="60"
-                cy="60"
-                r="50"
-                fill="none"
-                stroke="var(--accent-2)"
-                strokeWidth="8"
-                strokeDasharray={`${(currentQuestionIndex / checkpoint.questions.length) * 314} 314`}
-                strokeDashoffset="0"
-                transform="rotate(-90 60 60)"
-                style={{ transition: "stroke-dasharray 0.5s ease" }}
-              />
-            </svg>
-            <div className="progress-label">
-              {currentQuestionIndex} / {checkpoint.questions.length}
-            </div>
+        <div style={{ padding: "1rem 1.2rem" }}>
+          <div style={{ fontSize: "0.8rem", fontWeight: 700, color: "var(--ink-soft)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "0.5rem" }}>
+            Progress
           </div>
-          <p className="helper" style={{ textAlign: "center", marginTop: "1rem" }}>
-            Questions answered
-          </p>
+          <div style={{ background: "#e7ddd0", borderRadius: "999px", height: "8px", overflow: "hidden" }}>
+            <div style={{ width: `${progress}%`, height: "100%", background: "linear-gradient(90deg, var(--accent-2), var(--accent))", transition: "width 0.6s ease" }} />
+          </div>
+          <div style={{ marginTop: "0.4rem", fontSize: "0.82rem", color: "var(--ink-soft)" }}>
+            {isCompleted ? "Complete! 🎉" : `Question ${currentQuestionIndex + 1} of ${sessionQuestions.length}`}
+          </div>
         </div>
 
         <div className="sparring-info">
-          <h3 className="info-heading">About Knowledge Checks</h3>
+          <p className="info-heading">How Erica spars</p>
           <p className="info-text">
-            I'm your AI sparring partner. I'll ask questions and guide you to think through
-            concepts, not just test you. This is a conversation, not a quiz.
+            She asks questions from your actual material. Think out loud — uncertainty is fine. She guides, not grades.
           </p>
         </div>
-      </aside>
 
-      <section className="lesson-content">
-        <header className="content-header">
-          <div className="progress-wrap">
-            <div className="progress-bar" style={{ width: `${progress}%` }} />
+        {currentQuestion?.hints && currentQuestion.hints.length > 0 && !isCompleted && (
+          <div style={{ padding: "0 1.2rem" }}>
+            <button
+              style={{ width: "100%", padding: "0.6rem", background: "rgba(232,95,60,0.08)", border: "1px solid rgba(232,95,60,0.3)", borderRadius: "10px", cursor: "pointer", fontSize: "0.85rem", color: "var(--accent)" }}
+              onClick={() => setShowHint(!showHint)}
+            >
+              {showHint ? "Hide hint" : "💡 Show hint"}
+            </button>
+            {showHint && (
+              <div style={{ marginTop: "0.5rem", padding: "0.7rem", background: "rgba(232,95,60,0.06)", borderRadius: "8px", fontSize: "0.85rem", lineHeight: 1.5, color: "var(--ink-soft)" }}>
+                {currentQuestion.hints[0]}
+              </div>
+            )}
           </div>
-          <div className="breadcrumb">Knowledge Check · {module.title}</div>
-        </header>
+        )}
+      </div>
 
-        <article className="chat-container">
+      <div className="lesson-content">
+        <div className="content-header" style={{ padding: "1rem 1.5rem" }}>
+          <h1 style={{ margin: 0, fontSize: "1.3rem", fontWeight: 700 }}>
+            Knowledge Check — {module.title}
+          </h1>
+          <p className="breadcrumb">{module.objective}</p>
+        </div>
+
+        <div className="chat-container">
           <div className="chat-messages">
             {messages.map((msg) => (
               <div key={msg.id} className={`chat-message ${msg.role}`}>
-                <div className="message-avatar">
-                  {msg.role === "erica" ? "🎓" : "👤"}
-                </div>
+                <div className="message-avatar">{msg.role === "erica" ? "🤖" : "👤"}</div>
                 <div className="message-content">
-                  <div className="message-author">
-                    {msg.role === "erica" ? "Erica" : "You"}
-                  </div>
-                  <div className="message-text">{msg.content}</div>
+                  <div className="message-author">{msg.role === "erica" ? "Erica" : "You"}</div>
+                  <div
+                    className="message-text"
+                    dangerouslySetInnerHTML={{
+                      __html: msg.content
+                        .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+                        .replace(/\n/g, "<br/>"),
+                    }}
+                  />
                 </div>
               </div>
             ))}
+
+            {isLoading && (
+              <div className="chat-message erica">
+                <div className="message-avatar">🤖</div>
+                <div className="message-content">
+                  <div className="message-author">Erica</div>
+                  <div className="message-text" style={{ display: "flex", gap: "4px", alignItems: "center", padding: "0.9rem 1.1rem" }}>
+                    <span className="typing-dot" />
+                    <span className="typing-dot" style={{ animationDelay: "0.15s" }} />
+                    <span className="typing-dot" style={{ animationDelay: "0.3s" }} />
+                  </div>
+                </div>
+              </div>
+            )}
             <div ref={messagesEndRef} />
           </div>
 
-          {!isComplete && (
+          {!isCompleted ? (
             <form className="chat-input-form" onSubmit={handleSubmit}>
               <textarea
                 className="chat-input"
-                value={userInput}
-                onChange={(e) => setUserInput(e.target.value)}
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                placeholder="Type your answer… (Enter to send, Shift+Enter for new line)"
+                rows={3}
+                disabled={isLoading}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
-                    handleSubmit(e);
+                    handleSubmit(e as unknown as React.FormEvent);
                   }
                 }}
-                placeholder="Type your response... (Shift+Enter for new line)"
-                rows={3}
-                disabled={isProcessing}
               />
-              <button
-                type="submit"
-                className="button primary"
-                disabled={!userInput.trim() || isProcessing}
-              >
-                {isProcessing ? "Thinking..." : "Send"}
-              </button>
+              <div style={{ display: "flex", gap: "0.8rem", alignItems: "center" }}>
+                <span style={{ fontSize: "0.78rem", color: "var(--ink-soft)", flex: 1 }}>
+                  Be specific — Erica will guide you deeper
+                </span>
+                <button
+                  className="button primary"
+                  type="submit"
+                  disabled={isLoading || !inputValue.trim()}
+                  style={{ minWidth: "80px" }}
+                >
+                  {isLoading ? "…" : "Send →"}
+                </button>
+              </div>
             </form>
-          )}
-
-          {isComplete && (
+          ) : (
             <div className="completion-actions">
+              <div style={{ textAlign: "center", marginBottom: "1.2rem" }}>
+                <div style={{ fontSize: "3rem", marginBottom: "0.5rem" }}>🎉</div>
+                <h3 style={{ margin: "0 0 0.4rem" }}>Knowledge Check Complete!</h3>
+                <p style={{ margin: 0, color: "var(--ink-soft)", fontSize: "0.95rem" }}>
+                  You&apos;ve demonstrated solid understanding of {module.title}
+                </p>
+              </div>
               <button
-                type="button"
                 className="button primary"
-                onClick={handleContinue}
-                style={{ width: "100%", padding: "1rem" }}
+                style={{ width: "100%" }}
+                onClick={() => onComplete(sessionId || "")}
               >
-                {moduleNumber < totalModules ? "Continue to next module →" : "Complete lesson →"}
+                Continue to Next Module →
               </button>
             </div>
           )}
-        </article>
-      </section>
-    </main>
+        </div>
+      </div>
+    </div>
   );
 }

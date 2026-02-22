@@ -5,6 +5,9 @@ from uuid import uuid4
 
 from app.store import store
 from app.templates.prompts import CHECKPOINT_SYSTEM_PROMPT
+from app.services.ai_sparring_service import AISparringPartner
+
+_ai_sparring = AISparringPartner()
 
 
 def _now_iso() -> str:
@@ -41,23 +44,42 @@ def _build_guided_question(topic: str, index: int) -> str:
 def create_checkpoint_session(
     lesson: dict, module: dict, checkpoint_id: str | None = None
 ) -> dict:
-    topics = _normalize_topics(module)
-    question_count = _question_count_for_topics(len(topics))
-    seed_topics = topics[:question_count]
-    while len(seed_topics) < question_count:
-        seed_topics.append(topics[-1])
+    exam_questions = module.get("exam_questions") or []
+    if exam_questions:
+        questions = [
+            {
+                "id": str(uuid4()),
+                "text": q["question"],
+                "answer": q.get("answer", ""),
+                "hints": q.get("hints", []),
+            }
+            for q in exam_questions[:3]
+        ]
+    else:
+        topics = _normalize_topics(module)
+        question_count = _question_count_for_topics(len(topics))
+        seed_topics = topics[:question_count]
+        while len(seed_topics) < question_count:
+            seed_topics.append(topics[-1])
+        questions = [
+            {"id": str(uuid4()), "text": _build_guided_question(topic, idx), "answer": "", "hints": []}
+            for idx, topic in enumerate(seed_topics)
+        ]
 
-    questions = [
-        {"id": str(uuid4()), "text": _build_guided_question(topic, idx)}
-        for idx, topic in enumerate(seed_topics)
-    ]
+    module_id = str(module.get("module_id") or module.get("id") or "module")
 
     session = {
         "session_id": str(uuid4()),
         "lesson_id": str(lesson.get("id", "")),
-        "module_id": str(module.get("id", "")),
-        "checkpoint_id": checkpoint_id or f"{module.get('id', 'module')}-checkpoint",
+        "module_id": module_id,
+        "checkpoint_id": checkpoint_id or f"{module_id}-checkpoint",
         "prompt_template": CHECKPOINT_SYSTEM_PROMPT,
+        "module_context": {
+            "title": module.get("title", ""),
+            "objective": module.get("objective", ""),
+            "concept_explanation": module.get("concept_explanation", ""),
+            "key_insight": module.get("key_insight", ""),
+        },
         "questions": questions,
         "qa_pairs": [],
         "completed": False,

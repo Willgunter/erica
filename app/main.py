@@ -11,6 +11,7 @@ from app.lesson_engine.repository import InMemoryLessonRepository
 from app.lesson_engine.service import LessonGenerationService
 from app.lesson_engine.storage import LocalObjectStorage
 from app.lesson_engine.worker_queue import InProcessWorkerQueue
+from app.services.ai_sparring_service import AISparringPartner
 from app.services.checkpoint_service import (
     create_checkpoint_session,
     record_checkpoint_answers,
@@ -44,6 +45,7 @@ def _create_service() -> LessonGenerationService:
 def create_app() -> Flask:
     app = Flask(__name__)
     service = _create_service()
+    ai_sparring = AISparringPartner()
 
     @app.get("/health")
     def health() -> Any:
@@ -138,6 +140,31 @@ def create_app() -> Flask:
                 return jsonify({"error": "answers must be an array"}), 400
 
             updated = record_checkpoint_answers(session=session, answers=answers)
+            
+            ai_response = None
+            if answers and len(answers) > 0:
+                last_answer = answers[-1]
+                question_id = last_answer.get("question_id")
+                student_answer = last_answer.get("answer", "")
+
+                question_obj = next(
+                    (q for q in session["questions"] if q["id"] == question_id),
+                    None
+                )
+
+                if question_obj:
+                    module_context = session.get("module_context") or {}
+                    conv_history = [
+                        {"role": "student", "content": pair["answer"]}
+                        for pair in session.get("qa_pairs", [])[-4:]
+                    ]
+                    ai_response = ai_sparring.generate_guiding_response(
+                        question=question_obj["text"],
+                        student_answer=student_answer,
+                        module_context=module_context,
+                        conversation_history=conv_history,
+                    )
+
             return jsonify(
                 {
                     "session_id": updated["session_id"],
@@ -145,14 +172,20 @@ def create_app() -> Flask:
                     "completed": updated["completed"],
                     "qa_pairs": updated["qa_pairs"],
                     "remaining_question_ids": remaining_question_ids(updated),
+                    "ai_feedback": ai_response,
                 }
             )
 
-        module = _find_module(lesson=lesson, module_id=str(module_id))
-        if module is None:
-            return jsonify({"error": "module not found in lesson"}), 404
+        lesson_id = lesson.get("id", "")
+        full_lesson = service.get_lesson(lesson_id) if lesson_id else None
+        if full_lesson is None:
+            full_lesson = lesson
 
-        session = create_checkpoint_session(lesson=lesson, module=module)
+        module = _find_module(lesson=full_lesson, module_id=str(module_id))
+        if module is None:
+            return jsonify({"error": f"module '{module_id}' not found in lesson '{lesson_id}'"}), 404
+
+        session = create_checkpoint_session(lesson=full_lesson, module=module)
         return jsonify(
             {
                 "session_id": session["session_id"],

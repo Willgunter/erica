@@ -144,6 +144,8 @@ class ContentChunk:
 class Lesson:
     id: str
     user_id: str
+    title: str
+    subject: str
     status: str
     modules: list[dict[str, Any]]
     media_assets: list[dict[str, Any]]
@@ -162,9 +164,13 @@ class Lesson:
         estimated_duration: int,
     ) -> "Lesson":
         lesson_id = f"lesson-{uuid4().hex[:12]}"
+        module_titles = ", ".join(m.get("title", "") for m in modules[:2])
+        title = f"{profile.subject}: {module_titles}" if module_titles else f"Study Session — {profile.subject}"
         return cls(
             id=lesson_id,
             user_id=profile.user_id,
+            title=title,
+            subject=profile.subject,
             status="generating",
             modules=modules,
             media_assets=[],
@@ -177,6 +183,8 @@ class Lesson:
         return {
             "id": self.id,
             "user_id": self.user_id,
+            "title": self.title,
+            "subject": self.subject,
             "status": self.status,
             "modules": self.modules,
             "media_assets": self.media_assets,

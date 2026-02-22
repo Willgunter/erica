@@ -1,159 +1,267 @@
 from __future__ import annotations
 
-import math
+import json
+import os
 import re
+import uuid
 from typing import Any
 
 from .models import ContentChunk, Profile
 
 
-class LessonPlanner:
-    """Builds stepwise modules and checkpoints from profile + content chunks."""
+# ─── helpers ─────────────────────────────────────────────────────────────────
 
-    _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+def _slugify(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+
+
+def _estimate_minutes(chunk_count: int, pacing: str) -> int:
+    base = max(5, chunk_count * 3)
+    factor = {"relaxed": 1.4, "moderate": 1.0, "intensive": 0.7}.get(pacing, 1.0)
+    return max(5, round(base * factor))
+
+
+def _init_gemini():
+    try:
+        import google.generativeai as genai
+        api_key = os.environ.get("GEMINI_API_KEY", "")
+        if api_key:
+            genai.configure(api_key=api_key)
+            return genai.GenerativeModel("gemini-1.5-flash")
+    except Exception:
+        pass
+    return None
+
+
+# ─── planner ─────────────────────────────────────────────────────────────────
+
+class LessonPlanner:
+    def __init__(self):
+        self.gemini_model = _init_gemini()
 
     def plan(
         self,
         profile: Profile,
         chunks: list[ContentChunk],
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
-        grouped_chunks = self._group_chunks(profile=profile, chunks=chunks)
-        modules: list[dict[str, Any]] = []
-        checkpoints: list[dict[str, Any]] = []
+    ) -> tuple[list[dict], list[dict], int]:
+        full_text = "\n\n".join(c.text for c in chunks)
+        analyzed = self._analyze_with_gemini(full_text, profile)
 
-        for index, group in enumerate(grouped_chunks, start=1):
-            module = self._build_module(index=index, group=group, profile=profile)
+        modules: list[dict] = []
+        checkpoints: list[dict] = []
+
+        for index, concept in enumerate(analyzed, start=1):
+            module = self._build_module_from_concept(index, concept, profile, chunks)
             modules.append(module)
             checkpoints.append(module["checkpoint"])
 
-        estimated_duration = sum(module["estimated_minutes"] for module in modules)
+        estimated_duration = sum(m["estimated_minutes"] for m in modules)
         return modules, checkpoints, estimated_duration
 
-    def _group_chunks(self, profile: Profile, chunks: list[ContentChunk]) -> list[list[ContentChunk]]:
-        if not chunks:
-            fallback = ContentChunk(
-                id="chunk-0",
-                source_id="generated",
-                chunk_index=0,
-                text=f"Foundational overview for {profile.subject}.",
-                metadata={"generated": True},
-            )
-            return [[fallback]]
+    # ── gemini analysis ───────────────────────────────────────────────────────
 
-        base_count = max(1, min(8, math.ceil(len(chunks) / 2)))
-        if profile.pacing == "slow":
-            target_modules = min(base_count + 1, len(chunks))
-        elif profile.pacing == "fast":
-            target_modules = max(1, base_count - 1)
-        else:
-            target_modules = base_count
+    def _analyze_with_gemini(self, full_text: str, profile: Profile) -> list[dict]:
+        """Use Gemini to extract structured learning modules from raw content."""
+        if not self.gemini_model:
+            return self._fallback_analysis(full_text, profile)
 
-        per_module = math.ceil(len(chunks) / target_modules)
-        grouped: list[list[ContentChunk]] = []
-        for start in range(0, len(chunks), per_module):
-            grouped.append(chunks[start : start + per_module])
-        return grouped
+        try:
+            text_sample = full_text[:20000]
+            print(f"[Planner] Analyzing {len(full_text)} chars of content (using {len(text_sample)} chars)")
+            prompt = f"""You are an expert educational AI analyzing study material for a student.
 
-    def _build_module(
+Subject: {profile.subject}
+Student Goals: {', '.join(profile.goals[:2]) if profile.goals else 'master the subject'}
+
+Here is the raw content from their study material (practice exam/notes):
+---
+{text_sample}
+---
+
+Analyze this content and extract 3-5 distinct learning modules based on the CONCEPTS being tested.
+Do NOT just copy exam questions — identify the underlying concepts and TEACH them.
+
+For each module provide:
+1. A clear concept title (4-7 words)
+2. concept_explanation: A thorough, clear explanation teaching this concept (4-5 sentences, written as if tutoring the student)
+3. key_insight: The single most important sentence to remember
+4. flashcards: Create 5-7 HIGH-QUALITY flashcards that test understanding of THIS SPECIFIC CONTENT. Each flashcard should:
+   - Front: A specific term, definition prompt, or concept question from the material
+   - Back: A clear, complete answer with relevant details from the content
+   - Cover key facts, definitions, processes, and relationships from the actual material
+5. exam_questions: Create 2-3 challenging questions that TEST understanding of this concept:
+   - Use actual questions from the material if available
+   - Otherwise, create questions that test application and understanding (not just memorization)
+   - Include detailed answers with explanations
+   - Provide 2-3 helpful hints that guide thinking without giving away the answer
+
+CRITICAL: The flashcards MUST be based on the ACTUAL content provided, not generic questions. Extract specific facts, terms, processes, and concepts from the text.
+
+Return ONLY valid JSON with NO markdown fences, NO extra text:
+{{"modules": [{{"title": "...", "concept_explanation": "...", "key_insight": "...", "flashcards": [{{"front": "...", "back": "..."}}], "exam_questions": [{{"question": "...", "answer": "...", "hints": ["...", "..."]}}]}}]}}"""
+
+            response = self.gemini_model.generate_content(prompt)
+            text = response.text.strip()
+
+            if "```json" in text:
+                text = text.split("```json")[1].split("```")[0].strip()
+            elif "```" in text:
+                text = text.split("```")[1].split("```")[0].strip()
+
+            parsed = json.loads(text)
+            modules = parsed.get("modules", [])
+            if modules:
+                print(f"[Planner] Successfully generated {len(modules)} modules with Gemini")
+                for i, mod in enumerate(modules, 1):
+                    fc_count = len(mod.get("flashcards", []))
+                    eq_count = len(mod.get("exam_questions", []))
+                    print(f"  Module {i}: {mod.get('title', 'Untitled')} - {fc_count} flashcards, {eq_count} exam questions")
+                return modules
+        except Exception as e:
+            print(f"[Planner] Gemini analysis failed: {e}")
+
+        return self._fallback_analysis(full_text, profile)
+
+    def _fallback_analysis(self, full_text: str, profile: Profile) -> list[dict]:
+        """Simple fallback when Gemini is unavailable."""
+        words = full_text.split()
+        chunk_size = max(200, len(words) // 4)
+        segments = []
+        for i in range(0, len(words), chunk_size):
+            seg = " ".join(words[i:i + chunk_size])
+            if seg.strip():
+                segments.append(seg)
+        segments = segments[:4]
+
+        modules = []
+        for i, seg in enumerate(segments):
+            title_words = [w for w in seg.split() if len(w) > 4][:4]
+            title = " ".join(title_words).title() or f"Module {i+1}"
+            
+            sentences = [s.strip() for s in seg.split('.') if len(s.strip()) > 20][:7]
+            flashcards = []
+            for j, sentence in enumerate(sentences[:7]):
+                words = sentence.split()
+                if len(words) > 5:
+                    key_term = ' '.join(words[:3])
+                    flashcards.append({
+                        "front": f"What is {key_term}?",
+                        "back": sentence
+                    })
+            
+            if len(flashcards) < 5:
+                flashcards.extend([
+                    {"front": f"What is {title}?", "back": seg[:120]},
+                    {"front": f"Why is {title} important?", "back": f"It helps achieve: {profile.goals[0] if profile.goals else 'your goals'}"},
+                ])
+            
+            modules.append({
+                "title": title,
+                "concept_explanation": seg[:500],
+                "key_insight": f"Focus on understanding {title.lower()} thoroughly.",
+                "flashcards": flashcards[:7],
+                "exam_questions": [
+                    {"question": f"Explain the concept of {title} in your own words.", "answer": seg[:200], "hints": ["Think about the definition", "Consider real examples"]},
+                    {"question": f"How does {title} relate to {profile.subject}?", "answer": "Connect the concept to its application in the subject.", "hints": ["Think about practical uses"]},
+                ],
+            })
+        return modules
+
+    # ── module builder ────────────────────────────────────────────────────────
+
+    def _build_module_from_concept(
         self,
         index: int,
-        group: list[ContentChunk],
+        concept: dict[str, Any],
         profile: Profile,
-    ) -> dict[str, Any]:
-        title = self._title_from_group(index=index, group=group, profile=profile)
-        summary = self._summary_from_group(group)
-        chunk_ids = [chunk.id for chunk in group]
+        chunks: list[ContentChunk],
+    ) -> dict:
+        title = concept.get("title", f"Module {index}")
+        concept_explanation = concept.get("concept_explanation", "")
+        key_insight = concept.get("key_insight", "")
+        flashcards = concept.get("flashcards", [])
+        exam_questions = concept.get("exam_questions", [])
 
-        pace_multiplier = {"slow": 1.2, "medium": 1.0, "fast": 0.8}[profile.pacing]
-        module_minutes = max(8, int((10 + len(group) * 2) * pace_multiplier))
+        steps = self._build_steps(concept_explanation, profile, title)
+        checkpoint = self._build_checkpoint(index, title, exam_questions, profile)
 
-        steps = [
-            {
-                "step_id": f"module-{index}-step-1",
-                "kind": "learn",
-                "title": "Concept Walkthrough",
-                "instruction": summary,
-                "estimated_minutes": max(3, int(4 * pace_multiplier)),
-            },
-            {
-                "step_id": f"module-{index}-step-2",
-                "kind": "practice",
-                "title": "Guided Practice",
-                "instruction": self._practice_prompt(profile=profile, summary=summary),
-                "estimated_minutes": max(3, int(3 * pace_multiplier)),
-            },
-            {
-                "step_id": f"module-{index}-step-3",
-                "kind": "challenge",
-                "title": "Mini Challenge",
-                "instruction": self._challenge_prompt(profile=profile, summary=summary),
-                "estimated_minutes": max(2, int(3 * pace_multiplier)),
-            },
-        ]
-
-        checkpoint = {
-            "checkpoint_id": f"checkpoint-{index}",
-            "module_id": f"module-{index}",
-            "marker": "knowledge_check",
-            "questions": self._checkpoint_questions(summary=summary, profile=profile),
-        }
+        chunks_per_module = max(1, len(chunks) // max(1, index))
+        start = (index - 1) * chunks_per_module
+        end = start + chunks_per_module
+        chunk_ids = [c.id for c in chunks[start:end]]
 
         return {
             "module_id": f"module-{index}",
             "title": title,
-            "objective": f"Apply {title.lower()} to {profile.goals[0].lower()}",
+            "objective": f"Understand and apply {title.lower()}",
             "teaching_style": profile.teaching_style,
             "pacing": profile.pacing,
             "chunk_ids": chunk_ids,
+            "concept_explanation": concept_explanation,
+            "key_insight": key_insight,
+            "flashcards": flashcards,
+            "exam_questions": exam_questions,
             "steps": steps,
             "checkpoint": checkpoint,
-            "estimated_minutes": module_minutes,
+            "estimated_minutes": _estimate_minutes(max(3, len(flashcards)), profile.pacing),
         }
 
-    def _title_from_group(
+    # ── steps ─────────────────────────────────────────────────────────────────
+
+    def _build_steps(
+        self, concept_explanation: str, profile: Profile, title: str
+    ) -> list[dict]:
+        return [
+            {
+                "step_id": str(uuid.uuid4()),
+                "kind": "learn",
+                "title": "Concept Walkthrough",
+                "instruction": concept_explanation,
+                "media_ref": None,
+            },
+            {
+                "step_id": str(uuid.uuid4()),
+                "kind": "practice",
+                "title": "Guided Practice",
+                "instruction": (
+                    f"Review the flashcards for {title}. "
+                    f"Try to explain each concept back in your own words before flipping."
+                ),
+                "media_ref": None,
+            },
+            {
+                "step_id": str(uuid.uuid4()),
+                "kind": "challenge",
+                "title": "AI Spar",
+                "instruction": (
+                    "Test your understanding with Erica. "
+                    "She will ask you questions from the practice exam and guide you to the right answers."
+                ),
+                "media_ref": None,
+            },
+        ]
+
+    # ── checkpoint ────────────────────────────────────────────────────────────
+
+    def _build_checkpoint(
         self,
         index: int,
-        group: list[ContentChunk],
+        title: str,
+        exam_questions: list[dict],
         profile: Profile,
-    ) -> str:
-        first = group[0]
-        explicit_title = first.metadata.get("title") or first.metadata.get("topic")
-        if explicit_title:
-            return str(explicit_title)
-        sentence = self._first_sentence(first.text)
-        trimmed = " ".join(sentence.split()[:6]).strip()
-        if trimmed:
-            return f"Module {index}: {trimmed}"
-        return f"Module {index}: {profile.subject} Foundations"
-
-    def _summary_from_group(self, group: list[ContentChunk]) -> str:
-        sentences: list[str] = []
-        for chunk in group:
-            sentences.extend(self._SENTENCE_SPLIT.split(chunk.text))
-        filtered = [sentence.strip() for sentence in sentences if sentence.strip()]
-        if not filtered:
-            return "Work through the core ideas and connect them to practical usage."
-        return " ".join(filtered[:2])
-
-    def _first_sentence(self, text: str) -> str:
-        parts = self._SENTENCE_SPLIT.split(text.strip())
-        return parts[0] if parts else text
-
-    def _practice_prompt(self, profile: Profile, summary: str) -> str:
-        return (
-            f"Follow a guided example using this idea: {summary} "
-            f"Then explain the result in one sentence for a {profile.pacing} pacing track."
+    ) -> dict:
+        question_texts = (
+            [q["question"] for q in exam_questions[:3]]
+            if exam_questions
+            else [
+                f"Explain {title} in your own words.",
+                f"How does {title} connect to {profile.goals[0] if profile.goals else 'your goals'}?",
+                "What's still unclear about this concept?",
+            ]
         )
-
-    def _challenge_prompt(self, profile: Profile, summary: str) -> str:
-        return (
-            f"Create a short solution that applies: {summary} "
-            f"Match this style preference: {profile.teaching_style or 'hands-on'}."
-        )
-
-    def _checkpoint_questions(self, summary: str, profile: Profile) -> list[str]:
-        return [
-            f"What is the key takeaway from this module in your own words? ({summary})",
-            f"How would you apply this concept to your goal: {profile.goals[0]}?",
-            "What part still feels uncertain and why?",
-        ]
+        return {
+            "checkpoint_id": f"checkpoint-{index}",
+            "module_id": f"module-{index}",
+            "marker": "knowledge_check",
+            "questions": question_texts,
+        }

@@ -28,5 +28,8 @@ class Config:
     supabase_service_key: str | None = os.getenv("SUPABASE_SERVICE_KEY")
     supabase_bucket: str | None = os.getenv("SUPABASE_BUCKET", "lesson-sources")
 
+    # AI API keys
+    gemini_api_key: str | None = os.getenv("GEMINI_API_KEY")
+
 
 ALLOWED_FILE_TYPES = {"pdf", "ppt", "pptx", "docx", "txt"}

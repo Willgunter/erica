@@ -6,34 +6,44 @@ import { LessonPlayer } from "@/components/lesson-player";
 
 type Lesson = {
   id: string;
+  title?: string;
+  subject?: string;
   status: "generating" | "completed" | "failed";
   modules: Array<{
     module_id: string;
     title: string;
     objective: string;
     teaching_style: string;
+    pacing?: string;
+    concept_explanation?: string;
+    key_insight?: string;
+    flashcards?: Array<{ front: string; back: string }>;
+    exam_questions?: Array<{ question: string; answer: string; hints: string[] }>;
     steps: Array<{
       step_id: string;
       kind: string;
       title: string;
       instruction: string;
-      estimated_minutes: number;
+      media_ref?: string | null;
     }>;
     checkpoint: {
       checkpoint_id: string;
-      module_id: string;
-      marker: string;
+      module_id?: string;
+      marker?: string;
       questions: string[];
     };
+    estimated_minutes: number;
   }>;
   media_assets: Array<{
     asset_id: string;
     module_id: string;
-    asset_type: "video" | "audio";
-    storage_url: string | null;
+    kind?: "visual" | "audio";
+    asset_type?: "video" | "audio";
+    storage_url?: string | null;
+    url?: string | null;
     status: string;
   }>;
-  profile: any;
+  profile?: any;
   estimated_duration: number;
 };
 
@@ -85,8 +95,17 @@ export default function LearnPage() {
 
       const lessonData = await generateLesson(profileData, chunks);
       setLesson(lessonData);
+      
+      if (lessonData.id) {
+        sessionStorage.setItem("erica_lesson_id", lessonData.id);
+      }
 
-      if (lessonData.status === "completed") {
+      if (lessonData.modules && lessonData.modules.length > 0) {
+        setStatus("ready");
+        if (lessonData.status !== "completed") {
+          pollLessonStatus(lessonData.id);
+        }
+      } else if (lessonData.status === "completed") {
         setStatus("ready");
       } else {
         pollLessonStatus(lessonData.id);
@@ -102,13 +121,25 @@ export default function LearnPage() {
     const devUserId = window.localStorage.getItem("supabaseDevUserId");
     const token = window.localStorage.getItem("supabaseAccessToken");
 
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json"
-    };
-    if (token) headers["Authorization"] = `Bearer ${token}`;
-    if (devUserId) headers["x-dev-user-id"] = devUserId;
+    const makeRequest = async (useToken: string | null, useDevUserId: string | null) => {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json"
+      };
+      if (useToken) headers["Authorization"] = `Bearer ${useToken}`;
+      if (useDevUserId) headers["x-dev-user-id"] = useDevUserId;
 
-    const response = await fetch("/api/profile", { headers });
+      return fetch("/api/profile", { headers });
+    };
+
+    let response = await makeRequest(token, devUserId);
+    
+    if (response.status === 401 && !devUserId) {
+      const fallbackDevUserId = window.localStorage.getItem("supabaseDevUserId");
+      if (fallbackDevUserId) {
+        response = await makeRequest(null, fallbackDevUserId);
+      }
+    }
+
     if (!response.ok) return null;
 
     const data = await response.json();
@@ -186,8 +217,7 @@ export default function LearnPage() {
 
       const data = await response.json();
       setLesson(data);
-
-      if (data.status === "completed") {
+      if (data.status === "completed" || (data.modules && data.modules.length > 0)) {
         setStatus("ready");
       } else if (data.status === "failed") {
         setError("Lesson generation failed. Please try again.");
