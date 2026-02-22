@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useRouter } from "next/navigation";
 
 interface Message {
   id: string;
@@ -38,6 +39,7 @@ export function KnowledgeCheck({
   isLastModule = false,
   onComplete,
 }: KnowledgeCheckProps) {
+  const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -214,14 +216,22 @@ export function KnowledgeCheck({
             <h2 className="sidebar-title">AI Sparring</h2>
           </div>
         </div>
-        <div className="lesson-content">
-          <div className="loading-state">
-            <div className="spinner" />
-            <p style={{ marginTop: "1rem", color: "var(--ink-soft)" }}>Preparing your sparring session…</p>
-          </div>
+      <div className="lesson-content">
+        <div className="loading-state">
+          <div className="spinner" />
+          <p style={{ marginTop: "1rem", color: "var(--ink-soft)" }}>Preparing your sparring session…</p>
+          <button
+            type="button"
+            className="button secondary"
+            style={{ marginTop: "1rem" }}
+            onClick={() => router.push("/profile")}
+          >
+            Back to Profile
+          </button>
         </div>
       </div>
-    );
+    </div>
+  );
   }
 
   return (
@@ -249,6 +259,16 @@ export function KnowledgeCheck({
           <p className="info-text">
             She asks questions from your actual material. Think out loud — uncertainty is fine. She guides, not grades.
           </p>
+        </div>
+
+        <div style={{ padding: "0 1.2rem", marginBottom: "0.9rem" }}>
+          <button
+            className="button secondary"
+            style={{ width: "100%" }}
+            onClick={() => router.push("/profile")}
+          >
+            Back to Profile
+          </button>
         </div>
 
         {currentQuestion?.hints && currentQuestion.hints.length > 0 && !isCompleted && (

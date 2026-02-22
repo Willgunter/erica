@@ -413,13 +413,22 @@ export function LessonPlayer({ lesson, profile }: LessonPlayerProps) {
               <p style={{ color: "var(--ink-soft)", fontSize: "1.05rem", marginBottom: "2rem" }}>
                 You&apos;ve worked through all {lesson.modules.length} modules. Amazing effort!
               </p>
-              <button
-                className="button primary"
-                onClick={goToFinalTest}
-                style={{ fontSize: "1.1rem", padding: "0.8rem 2rem" }}
-              >
-                Continue to Final Test →
-              </button>
+              <div style={{ display: "flex", gap: "0.7rem", justifyContent: "center", flexWrap: "wrap" }}>
+                <button
+                  className="button secondary"
+                  onClick={() => router.push("/profile")}
+                  style={{ fontSize: "1.1rem", padding: "0.8rem 2rem" }}
+                >
+                  Back to Profile
+                </button>
+                <button
+                  className="button primary"
+                  onClick={goToFinalTest}
+                  style={{ fontSize: "1.1rem", padding: "0.8rem 2rem" }}
+                >
+                  Continue to Final Test →
+                </button>
+              </div>
             </div>
           </div>
         ) : (
@@ -473,6 +482,12 @@ export function LessonPlayer({ lesson, profile }: LessonPlayerProps) {
               <div style={{ flex: 1, fontSize: "0.88rem", color: "var(--ink-soft)" }}>
                 Module {currentModuleIndex + 1} of {lesson.modules.length}
               </div>
+              <button
+                className="button secondary"
+                onClick={() => router.push("/profile")}
+              >
+                Back to Profile
+              </button>
               {!isOnFinalModule && (
                 <button
                   className="button secondary"

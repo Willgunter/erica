@@ -46,13 +46,22 @@ export default function SummaryPage() {
           <h1 className="hero-title">No test results found</h1>
         </header>
         <section className="onboarding-body">
-          <button
-            type="button"
-            className="button primary"
-            onClick={() => router.push("/learn")}
-          >
-            Start a new lesson
-          </button>
+          <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
+            <button
+              type="button"
+              className="button secondary"
+              onClick={() => router.push("/profile")}
+            >
+              Back to profile
+            </button>
+            <button
+              type="button"
+              className="button primary"
+              onClick={() => router.push("/learn")}
+            >
+              Start a new lesson
+            </button>
+          </div>
         </section>
       </main>
     );
@@ -146,6 +155,14 @@ export default function SummaryPage() {
           <div className="summary-actions">
             <h3 className="section-heading">What's next?</h3>
             <div className="action-grid">
+              <button
+                type="button"
+                className="action-card"
+                onClick={() => router.push("/profile")}
+              >
+                <span className="action-icon">👤</span>
+                <span className="action-title">Back to profile</span>
+              </button>
               <button
                 type="button"
                 className="action-card"

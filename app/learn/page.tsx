@@ -444,6 +444,14 @@ export default function LearnPage() {
           <div className="loading-state">
             <div className="spinner" />
             <p>Loading your content...</p>
+            <button
+              type="button"
+              className="button secondary"
+              style={{ marginTop: "1rem" }}
+              onClick={() => router.push("/profile")}
+            >
+              Back to profile
+            </button>
           </div>
         </section>
       </main>
@@ -470,6 +478,14 @@ export default function LearnPage() {
             <p className="helper" style={{ textAlign: "center", marginTop: "1rem" }}>
               This usually takes 10-30 seconds.
             </p>
+            <button
+              type="button"
+              className="button secondary"
+              style={{ marginTop: "1rem" }}
+              onClick={() => router.push("/profile")}
+            >
+              Back to profile
+            </button>
           </div>
         </section>
       </main>
@@ -493,6 +509,13 @@ export default function LearnPage() {
                 onClick={() => router.push("/upload")}
               >
                 ← Back to upload
+              </button>
+              <button
+                type="button"
+                className="button secondary"
+                onClick={() => router.push("/profile")}
+              >
+                Back to profile
               </button>
               <button
                 type="button"

@@ -1,5 +1,3 @@
-import "server-only";
-
 import { spawnSync } from "node:child_process";
 import vm from "node:vm";
 import type {
