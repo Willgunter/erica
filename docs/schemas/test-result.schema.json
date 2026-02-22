@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TestResult",
+  "type": "object",
+  "required": ["test_id", "completed"],
+  "properties": {
+    "test_id": { "type": "string" },
+    "completed": { "type": "boolean" },
+    "missing_question_ids": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "message": { "type": "string" },
+    "score": {
+      "type": "object",
+      "required": ["correct", "total", "percentage"],
+      "properties": {
+        "correct": { "type": "integer", "minimum": 0 },
+        "total": { "type": "integer", "minimum": 0 },
+        "percentage": { "type": "number", "minimum": 0, "maximum": 100 }
+      }
+    },
+    "feedback": {
+      "type": "object",
+      "required": ["summary", "strong_topics", "focus_topics"],
+      "properties": {
+        "summary": { "type": "string" },
+        "strong_topics": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "focus_topics": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "submitted_at": { "type": "string" }
+  }
+}

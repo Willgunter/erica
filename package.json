@@ -1,0 +1,39 @@
+{
+  "name": "erica",
+  "version": "1.0.0",
+  "description": "Implementation of `agents/agent-02.md`: - Upload UI for files and free-text topics. - `POST /api/ingest` and `GET /api/ingest/:id` interfaces. - Async parsing/chunking pipeline with Redis + RQ worker. - `lesson_sources` + `content_chunks` schema and storage. - Retry path via `POST /api/ingest/:id/retry`.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "lib": "lib",
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Willgunter/erica.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Willgunter/erica/issues"
+  },
+  "homepage": "https://github.com/Willgunter/erica#readme",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.97.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.17",
+    "@types/react": "19.2.14",
+    "next": "^15.3.1",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "typescript": "5.9.3"
+  }
+}

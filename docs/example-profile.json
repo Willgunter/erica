@@ -1,0 +1,31 @@
+{
+  "user_id": "75f4a25a-c7f5-4b5e-b8eb-5037f00cc6a0",
+  "subject": "Biology",
+  "goals": [
+    "Prepare for an exam",
+    "Build foundational knowledge"
+  ],
+  "study_time": "30_min",
+  "pacing": "steady",
+  "accessibility": {
+    "captions": true,
+    "highContrast": false,
+    "reduceMotion": true,
+    "dyslexiaFriendlyFont": false,
+    "screenReaderOptimized": false
+  },
+  "learning_preferences": {
+    "teaching_style": null,
+    "content_formats": [
+      "text",
+      "interactive"
+    ],
+    "review_preferences": [
+      "practice_quiz",
+      "spaced_repetition"
+    ],
+    "uncertainty_flags": {
+      "teaching_style": true
+    }
+  }
+}

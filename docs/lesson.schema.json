@@ -1,0 +1,167 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://erica.local/schemas/lesson.schema.json",
+  "title": "Lesson",
+  "type": "object",
+  "required": [
+    "id",
+    "status",
+    "modules",
+    "media_assets",
+    "checkpoints",
+    "estimated_duration"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "user_id": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "generating",
+        "completed",
+        "failed"
+      ]
+    },
+    "modules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "module_id",
+          "title",
+          "objective",
+          "steps",
+          "checkpoint",
+          "estimated_minutes"
+        ],
+        "properties": {
+          "module_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "objective": {
+            "type": "string"
+          },
+          "teaching_style": {
+            "type": "string"
+          },
+          "pacing": {
+            "type": "string",
+            "enum": [
+              "slow",
+              "medium",
+              "fast"
+            ]
+          },
+          "chunk_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "steps": {
+            "type": "array",
+            "minItems": 3,
+            "items": {
+              "type": "object",
+              "required": [
+                "step_id",
+                "kind",
+                "title",
+                "instruction",
+                "estimated_minutes"
+              ],
+              "properties": {
+                "step_id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "learn",
+                    "practice",
+                    "challenge"
+                  ]
+                },
+                "title": {
+                  "type": "string"
+                },
+                "instruction": {
+                  "type": "string"
+                },
+                "estimated_minutes": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
+          },
+          "checkpoint": {
+            "type": "object",
+            "required": [
+              "checkpoint_id",
+              "module_id",
+              "marker",
+              "questions"
+            ],
+            "properties": {
+              "checkpoint_id": {
+                "type": "string"
+              },
+              "module_id": {
+                "type": "string"
+              },
+              "marker": {
+                "type": "string",
+                "const": "knowledge_check"
+              },
+              "questions": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 3,
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "estimated_minutes": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    },
+    "media_assets": {
+      "type": "array",
+      "items": {
+        "$ref": "asset-manifest.schema.json"
+      }
+    },
+    "checkpoints": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "estimated_duration": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "profile": {
+      "type": "object"
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "updated_at": {
+      "type": "string"
+    }
+  }
+}

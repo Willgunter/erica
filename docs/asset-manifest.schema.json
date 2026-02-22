@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://erica.local/schemas/asset-manifest.schema.json",
+  "title": "AssetManifestEntry",
+  "type": "object",
+  "required": [
+    "asset_id",
+    "module_id",
+    "asset_type",
+    "learner_path",
+    "status",
+    "storage_url",
+    "duration_seconds"
+  ],
+  "properties": {
+    "asset_id": {
+      "type": "string"
+    },
+    "module_id": {
+      "type": "string"
+    },
+    "asset_type": {
+      "type": "string",
+      "enum": [
+        "video",
+        "audio"
+      ]
+    },
+    "learner_path": {
+      "type": "string",
+      "enum": [
+        "visual",
+        "auditory"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "queued",
+        "processing",
+        "completed",
+        "failed"
+      ]
+    },
+    "storage_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "duration_seconds": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Account History</title>
+    <link rel="stylesheet" href="/static/agent05.css" />
+  </head>
+  <body>
+    <div class="bg" aria-hidden="true"></div>
+    <main class="shell">
+      <header class="hero">
+        <p class="eyebrow">Agent 05</p>
+        <h1>Lesson Performance Atlas</h1>
+        <p class="subtitle">
+          Review completed lessons, identify weak areas, and replay full lesson assets.
+        </p>
+        <form id="history-controls" class="controls">
+          <label for="user-id">User ID</label>
+          <input id="user-id" name="user-id" value="demo-user" />
+          <button type="submit">Load History</button>
+          <button id="seed-summary" type="button">Create Demo Summary</button>
+        </form>
+      </header>
+
+      <section class="metrics">
+        <article>
+          <h2>Average Accuracy</h2>
+          <p id="avg-accuracy">0%</p>
+        </article>
+        <article>
+          <h2>Total Lessons</h2>
+          <p id="total-lessons">0</p>
+        </article>
+        <article>
+          <h2>Primary Focus Area</h2>
+          <p id="top-focus">None</p>
+        </article>
+      </section>
+
+      <section class="history">
+        <div class="history-head">
+          <h2>Summaries</h2>
+          <p id="history-count">0 records</p>
+        </div>
+        <ul id="summary-list"></ul>
+      </section>
+    </main>
+
+    <dialog id="summary-dialog">
+      <article class="dialog-body">
+        <header>
+          <h2 id="dialog-title">Summary</h2>
+          <button id="dialog-close" type="button">Close</button>
+        </header>
+        <p id="dialog-meta"></p>
+        <div id="topic-table"></div>
+        <h3>Recommendations</h3>
+        <ul id="recommendations"></ul>
+        <a id="replay-link" href="/">Replay Lesson</a>
+      </article>
+    </dialog>
+
+    <script src="/static/agent05-history.js"></script>
+  </body>
+</html>

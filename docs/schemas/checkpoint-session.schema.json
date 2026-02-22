@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CheckpointSession",
+  "type": "object",
+  "required": [
+    "session_id",
+    "lesson_id",
+    "module_id",
+    "checkpoint_id",
+    "questions",
+    "qa_pairs",
+    "completed"
+  ],
+  "properties": {
+    "session_id": { "type": "string" },
+    "lesson_id": { "type": "string" },
+    "module_id": { "type": "string" },
+    "checkpoint_id": { "type": "string" },
+    "questions": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "required": ["id", "text"],
+        "properties": {
+          "id": { "type": "string" },
+          "text": { "type": "string" }
+        }
+      }
+    },
+    "qa_pairs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["question_id", "question", "answer"],
+        "properties": {
+          "question_id": { "type": "string" },
+          "question": { "type": "string" },
+          "answer": { "type": "string" }
+        }
+      }
+    },
+    "remaining_question_ids": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "completed": { "type": "boolean" }
+  }
+}

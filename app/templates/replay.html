@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Lesson Replay</title>
+    <link rel="stylesheet" href="/static/agent05.css" />
+  </head>
+  <body>
+    <div class="bg" aria-hidden="true"></div>
+    <main class="shell replay-shell">
+      <header class="hero replay-hero">
+        <a href="/history">Back to History</a>
+        <h1 id="replay-title">Lesson Replay</h1>
+        <p id="replay-meta" class="subtitle"></p>
+      </header>
+
+      <section class="replay-controls">
+        <button id="prev-module" type="button">Previous</button>
+        <span id="module-index">Module 0 / 0</span>
+        <button id="next-module" type="button">Next</button>
+      </section>
+
+      <section id="module-card" class="module-card"></section>
+      <section>
+        <h2>Media Assets</h2>
+        <ul id="asset-list"></ul>
+      </section>
+    </main>
+
+    <script>
+      window.AGENT05_SUMMARY_ID = "{{ summary_id }}";
+    </script>
+    <script src="/static/agent05-replay.js"></script>
+  </body>
+</html>
