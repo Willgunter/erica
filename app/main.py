@@ -49,6 +49,38 @@ def create_app() -> Flask:
     def health() -> Any:
         return jsonify({"ok": True})
 
+    @app.post("/api/parse")
+    def parse_file() -> Any:
+        from app.parsers import parse_source
+        from app.chunker import build_chunks
+        
+        if "file" not in request.files:
+            return jsonify({"error": "No file provided"}), 400
+        
+        file = request.files["file"]
+        if not file or not file.filename:
+            return jsonify({"error": "Invalid file"}), 400
+        
+        filename = file.filename.lower()
+        if filename.endswith(".pdf"):
+            source_type = "pdf"
+        elif filename.endswith(".pptx"):
+            source_type = "pptx"
+        elif filename.endswith(".docx"):
+            source_type = "docx"
+        elif filename.endswith((".txt", ".md")):
+            source_type = "txt"
+        else:
+            return jsonify({"error": f"Unsupported file type: {filename}"}), 400
+        
+        try:
+            data = file.read()
+            units = parse_source(data, source_type)
+            chunks = build_chunks(units)
+            return jsonify({"chunks": chunks})
+        except Exception as exc:
+            return jsonify({"error": str(exc)}), 500
+
     @app.post("/api/lesson/generate")
     def generate_lesson() -> Any:
         payload = request.get_json(silent=True) or {}

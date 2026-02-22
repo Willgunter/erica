@@ -8,7 +8,9 @@ type UploadedFile = {
   name: string;
   size: number;
   type: string;
-  content: string;
+  file: File;
+  chunks?: Array<{ id: string; text: string; metadata: any }>;
+  error?: string;
 };
 
 type TopicEntry = {
@@ -55,31 +57,52 @@ export default function UploadPage() {
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<"idle" | "processing">("idle");
 
-  const readFileAsText = (file: File): Promise<string> =>
-    new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = (e) => resolve((e.target?.result as string) ?? "");
-      if (file.type.startsWith("image/")) {
-        reader.readAsDataURL(file);
-      } else {
-        reader.readAsText(file);
+  const parseFile = async (file: File): Promise<{ chunks?: any[]; error?: string }> => {
+    if (file.type.startsWith("image/")) {
+      return { error: "Image parsing not yet supported. Please use PDF, PPTX, DOCX, or TXT files." };
+    }
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const response = await fetch("/api/parse", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        return { error: data.error || "Failed to parse file" };
       }
-    });
+
+      return { chunks: data.chunks };
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : "Failed to parse file" };
+    }
+  };
 
   const addFiles = useCallback(async (incoming: FileList | File[]) => {
+    setStatus("processing");
     const list = Array.from(incoming);
     const added: UploadedFile[] = [];
+    
     for (const file of list) {
-      const content = await readFileAsText(file);
+      const result = await parseFile(file);
       added.push({
         id: crypto.randomUUID(),
         name: file.name,
         size: file.size,
         type: file.type,
-        content
+        file,
+        chunks: result.chunks,
+        error: result.error,
       });
     }
+    
     setFiles((prev) => [...prev, ...added]);
+    setStatus("idle");
     setError(null);
   }, []);
 
@@ -132,13 +155,35 @@ export default function UploadPage() {
       return;
     }
 
+    const failedFiles = files.filter((f) => f.error);
+    if (failedFiles.length > 0) {
+      setError(`Some files failed to parse: ${failedFiles.map((f) => f.name).join(", ")}. Please remove them or try different files.`);
+      return;
+    }
+
     setStatus("processing");
     setError(null);
 
-    const chunks: Array<{ source: string; text: string }> = [
-      ...files.map((f) => ({ source: f.name, text: f.content })),
-      ...topics.map((t) => ({ source: "topic", text: t.value }))
-    ];
+    const chunks: Array<{ id?: string; source: string; text: string; metadata?: any }> = [];
+    
+    for (const file of files) {
+      if (file.chunks) {
+        chunks.push(...file.chunks.map((chunk) => ({
+          id: chunk.id,
+          source: file.name,
+          text: chunk.text,
+          metadata: chunk.metadata,
+        })));
+      }
+    }
+    
+    chunks.push(...topics.map((t) => ({ source: "topic", text: t.value })));
+
+    if (chunks.length === 0) {
+      setError("No content could be extracted. Please try different files or add topics.");
+      setStatus("idle");
+      return;
+    }
 
     sessionStorage.setItem("erica_content_chunks", JSON.stringify(chunks));
     router.push("/learn");
@@ -191,18 +236,30 @@ export default function UploadPage() {
           {files.length > 0 && (
             <ul className="file-list" aria-label="Uploaded files">
               {files.map((f) => (
-                <li key={f.id} className="file-item">
-                  <span className="file-icon">{fileIcon(f.type)}</span>
-                  <span className="file-name">{f.name}</span>
-                  <span className="file-size">{formatBytes(f.size)}</span>
-                  <button
-                    type="button"
-                    className="file-remove"
-                    onClick={() => removeFile(f.id)}
-                    aria-label={`Remove ${f.name}`}
-                  >
-                    ✕
-                  </button>
+                <li key={f.id} className="file-item" style={{ flexDirection: "column", alignItems: "flex-start" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", width: "100%" }}>
+                    <span className="file-icon">{fileIcon(f.type)}</span>
+                    <span className="file-name">{f.name}</span>
+                    <span className="file-size">{formatBytes(f.size)}</span>
+                    <button
+                      type="button"
+                      className="file-remove"
+                      onClick={() => removeFile(f.id)}
+                      aria-label={`Remove ${f.name}`}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  {f.error && (
+                    <p style={{ margin: "0.3rem 0 0 2rem", fontSize: "0.85rem", color: "#8c1a10" }}>
+                      Error: {f.error}
+                    </p>
+                  )}
+                  {f.chunks && (
+                    <p style={{ margin: "0.3rem 0 0 2rem", fontSize: "0.85rem", color: "#085d49" }}>
+                      ✓ Parsed {f.chunks.length} chunk{f.chunks.length !== 1 ? "s" : ""}
+                    </p>
+                  )}
                 </li>
               ))}
             </ul>

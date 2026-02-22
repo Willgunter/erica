@@ -10,7 +10,7 @@ def now_iso() -> str:
     return datetime.now(tz=timezone.utc).isoformat()
 
 
-@dataclass(slots=True)
+@dataclass
 class Profile:
     user_id: str
     subject: str
@@ -100,7 +100,7 @@ class Profile:
         }
 
 
-@dataclass(slots=True)
+@dataclass
 class ContentChunk:
     id: str
     source_id: str
@@ -140,7 +140,7 @@ class ContentChunk:
         }
 
 
-@dataclass(slots=True)
+@dataclass
 class Lesson:
     id: str
     user_id: str
