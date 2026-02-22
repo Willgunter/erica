@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@supabase/supabase-js";
 import type { AccessibilitySettings, ProfileInput } from "@/lib/profile";
 
@@ -188,7 +189,14 @@ export function OnboardingFlow() {
   const [status, setStatus] = useState<"idle" | "saving" | "done">("idle");
   const [result, setResult] = useState<Record<string, unknown> | null>(null);
 
+  const router = useRouter();
   const progress = useMemo(() => ((stepIndex + 1) / totalSteps) * 100, [stepIndex, totalSteps]);
+
+  useEffect(() => {
+    if (status === "done") {
+      router.push("/upload");
+    }
+  }, [status, router]);
 
   function addCustomGoal() {
     const value = customGoal.trim();

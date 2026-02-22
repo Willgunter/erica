@@ -276,6 +276,94 @@ a {
   white-space: pre-wrap;
 }
 
+.drop-zone {
+  margin-top: 1rem;
+  border: 2px dashed var(--line);
+  border-radius: var(--radius);
+  padding: 2.2rem 1.5rem;
+  text-align: center;
+  cursor: pointer;
+  background: #fffdf9;
+  transition: border-color 150ms ease, background 150ms ease;
+}
+
+.drop-zone:hover,
+.drop-zone.dragging {
+  border-color: var(--accent-2);
+  background: rgba(14, 126, 121, 0.06);
+}
+
+.drop-icon {
+  font-size: 2.2rem;
+  display: block;
+}
+
+.drop-label {
+  margin: 0.5rem 0 0.2rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.drop-hint {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.file-list {
+  list-style: none;
+  margin: 0.8rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.file-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.55rem 0.75rem;
+  background: #fffdf7;
+}
+
+.file-icon {
+  font-size: 1.2rem;
+  flex-shrink: 0;
+}
+
+.file-name {
+  flex: 1;
+  font-size: 0.9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-size {
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  flex-shrink: 0;
+}
+
+.file-remove {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--ink-soft);
+  font-size: 0.85rem;
+  padding: 0.1rem 0.3rem;
+  border-radius: 6px;
+  flex-shrink: 0;
+  transition: color 120ms ease;
+}
+
+.file-remove:hover {
+  color: var(--accent);
+}
+
 @media (max-width: 700px) {
   .onboarding-shell {
     width: calc(100% - 1.1rem);
