@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from app.lesson_engine.media import MediaGenerator
 from app.lesson_engine.planner import LessonPlanner
 from app.lesson_engine.repository import InMemoryLessonRepository
+from app.lesson_engine.models import Profile
 from app.lesson_engine.service import LessonGenerationService
 from app.lesson_engine.storage import LocalObjectStorage
 from app.lesson_engine.worker_queue import InProcessWorkerQueue
@@ -28,6 +29,8 @@ from app.services.summary_service import (
 )
 from app.services.test_service import create_test_session, submit_test_answers
 from app.store import store
+
+_logger = logging.getLogger(__name__)
 
 
 def _load_local_env_files() -> None:
@@ -56,6 +59,26 @@ def _create_service() -> LessonGenerationService:
         planner=planner,
         media_generator=media_generator,
         worker_queue=worker_queue,
+    )
+
+
+def _build_profile_from_lesson(lesson: dict[str, Any]) -> Profile:
+    profile_payload = lesson.get("profile")
+    if not isinstance(profile_payload, dict):
+        profile_payload = {}
+    return Profile.from_payload(
+        {
+            "user_id": profile_payload.get("user_id", str(lesson.get("user_id", "anonymous"))),
+            "subject": profile_payload.get("subject", str(lesson.get("subject", "General Studies"))),
+            "goals": profile_payload.get("goals", [f"Build practical understanding of {profile_payload.get('subject', 'General Studies')}"]),
+            "study_time_minutes": profile_payload.get("study_time_minutes", 30),
+            "pacing": profile_payload.get("pacing", "medium"),
+            "teaching_style": profile_payload.get("teaching_style", "not_sure"),
+            "content_formats": profile_payload.get("content_formats", ["visual"]),
+            "review_preferences": profile_payload.get("review_preferences", []),
+            "accessibility": profile_payload.get("accessibility", {}),
+            "uncertainty_flags": profile_payload.get("uncertainty_flags", []),
+        }
     )
 
 
@@ -133,6 +156,94 @@ def create_app() -> Flask:
         if lesson is None:
             return jsonify({"error": "lesson not found"}), 404
         return jsonify(lesson), 200
+
+    @app.post("/api/lesson/<lesson_id>/generate-short-video")
+    def generate_short_video(lesson_id: str) -> Any:
+        payload = request.get_json(silent=True) or {}
+        module_id = payload.get("module_id")
+        if not module_id:
+            return jsonify({"error": "module_id is required"}), 400
+        _logger.info("[API] generate-short-video start | lesson=%s module=%s", lesson_id, module_id)
+
+        lesson = service.get_lesson(lesson_id)
+        if lesson is None:
+            return jsonify({"error": "lesson not found"}), 404
+
+        module = _find_module(lesson, str(module_id))
+        if module is None:
+            return jsonify({"error": f"module '{module_id}' not found in lesson '{lesson_id}'"}), 404
+
+        prompt = str(payload.get("prompt") or "").strip()
+        if not prompt:
+            prompt = f"Create a concise {2}-second educational animation that introduces {module.get('title', 'the concept')}"
+        _logger.debug(
+            "[API] generate-short-video payload | lesson=%s module=%s prompt_len=%d",
+            lesson_id,
+            module_id,
+            len(prompt),
+        )
+
+        try:
+            profile = _build_profile_from_lesson(lesson=lesson)
+            updated_lesson = service.generate_short_visual_asset(
+                lesson_id=lesson_id,
+                module=module,
+                profile=profile,
+                prompt=prompt,
+                duration_seconds=2,
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+
+        if not updated_lesson:
+            return jsonify({"error": "lesson not found while saving generated video"}), 404
+
+        generated_asset = next(
+            (
+                asset
+                for asset in reversed(updated_lesson.get("media_assets", []))
+                if str(asset.get("module_id")) == str(module_id)
+                and str(asset.get("asset_type") or "") == "video"
+            ),
+            None
+        )
+        if generated_asset is None:
+            _logger.error(
+                "[API] generate-short-video missing generated asset | lesson=%s module=%s",
+                lesson_id,
+                module_id,
+            )
+            return jsonify({"error": "generated asset missing from lesson payload"}), 500
+
+        if str(generated_asset.get("status") or "") == "failed":
+            metadata = generated_asset.get("metadata") if isinstance(generated_asset.get("metadata"), dict) else {}
+            error_message = metadata.get("error") if isinstance(metadata, dict) else None
+            _logger.error(
+                "[API] generate-short-video failed | lesson=%s module=%s error=%s",
+                lesson_id,
+                module_id,
+                error_message,
+            )
+            return (
+                jsonify(
+                    {
+                        "error": str(error_message or "Short video generation failed"),
+                        "asset": generated_asset,
+                        "lesson": updated_lesson,
+                    }
+                ),
+                502,
+            )
+
+        _logger.info(
+            "[API] generate-short-video success | lesson=%s module=%s status=%s storage_url=%s",
+            lesson_id,
+            module_id,
+            generated_asset.get("status"),
+            generated_asset.get("storage_url"),
+        )
+
+        return jsonify({"lesson": updated_lesson, "asset": generated_asset}), 200
 
     @app.post("/api/checkpoint")
     def checkpoint() -> Any:

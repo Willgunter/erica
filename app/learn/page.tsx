@@ -365,6 +365,9 @@ export default function LearnPage() {
       "steady": "medium",
       "accelerated": "fast"
     };
+    const requestedFormats = Array.from(
+      new Set([...(profileData.learning_preferences.content_formats || []), "video"])
+    );
 
     const payload = {
       profile: {
@@ -374,7 +377,7 @@ export default function LearnPage() {
         study_time_minutes: studyTimeMap[profileData.study_time] || 30,
         pacing: pacingMap[profileData.pacing] || "medium",
         teaching_style: profileData.learning_preferences.teaching_style || "not_sure",
-        content_formats: profileData.learning_preferences.content_formats,
+        content_formats: requestedFormats,
         review_preferences: profileData.learning_preferences.review_preferences || [],
         accessibility: profileData.accessibility,
         uncertainty_flags: []
@@ -424,12 +427,16 @@ export default function LearnPage() {
       const data = (await response.json()) as Lesson;
       setLesson(data);
 
-      if (data.status === "completed" || (data.modules && data.modules.length > 0)) {
+      if (data.status === "completed") {
         setStatus("ready");
       } else if (data.status === "failed") {
         setError("Lesson generation failed. Please try again.");
         setStatus("error");
       } else {
+        // Keep the lesson usable while continuing to stream media asset updates.
+        if (data.modules && data.modules.length > 0) {
+          setStatus("ready");
+        }
         setTimeout(poll, 2000);
       }
     };

@@ -41,6 +41,10 @@ interface MediaAsset {
   url?: string | null;
   storage_url?: string | null;
   content_type?: string | null;
+  metadata?: {
+    renderer?: string;
+    [key: string]: unknown;
+  } | null;
 }
 
 interface Lesson {
@@ -65,6 +69,15 @@ interface LessonPlayerProps {
 
 type LearningMode = "flashcards" | "concept" | "listen" | "watch";
 type ViewMode = "content" | "knowledge-check";
+type ReadyAssetFilter = { renderer?: string };
+
+function resolveMediaSource(mediaUrl: string | null | undefined): string {
+  if (!mediaUrl) return "";
+  if (mediaUrl.startsWith("local://")) {
+    return `/api/lesson-assets?storage_url=${encodeURIComponent(mediaUrl)}`;
+  }
+  return mediaUrl;
+}
 
 function FlashcardDeck({ cards }: { cards: Flashcard[] }) {
   const [index, setIndex] = useState(0);
@@ -191,12 +204,16 @@ function ConceptView({ module }: { module: LessonModule }) {
 }
 
 export function LessonPlayer({ lesson, profile }: LessonPlayerProps) {
+  const HARDCODED_WATCH_VIDEO_URL = "/.vscode/QuadraticFormulaLesson.mp4";
   const router = useRouter();
   const [currentModuleIndex, setCurrentModuleIndex] = useState(0);
   const [viewMode, setViewMode] = useState<ViewMode>("content");
   const [learningMode, setLearningMode] = useState<LearningMode>("flashcards");
   const [completedModules, setCompletedModules] = useState<Set<string>>(new Set());
   const [isVerifyingSkipCode, setIsVerifyingSkipCode] = useState(false);
+  const [isGeneratingQuickWatch, setIsGeneratingQuickWatch] = useState(false);
+  const [quickWatchError, setQuickWatchError] = useState<string | null>(null);
+  const [quickWatchVideoUrl, setQuickWatchVideoUrl] = useState<string | null>(null);
 
   const currentModule = lesson.modules[currentModuleIndex];
 
@@ -208,21 +225,103 @@ export function LessonPlayer({ lesson, profile }: LessonPlayerProps) {
   const getModuleAssets = (moduleId: string) =>
     lesson.media_assets?.filter((a) => a.module_id === moduleId) || [];
 
-  const getReadyAsset = (moduleId: string, kind: "visual" | "audio") => {
+  const getReadyAsset = (
+    moduleId: string,
+    kind: "visual" | "audio",
+    filter: ReadyAssetFilter = {},
+  ) => {
     const assets = getModuleAssets(moduleId);
     const asset = assets.find((a) => {
       const aKind = a.kind || (a.asset_type === "video" ? "visual" : a.asset_type === "audio" ? "audio" : null);
       const aUrl = a.url || a.storage_url;
       const aStatus = a.status;
       const isReady = aStatus === "ready" || aStatus === "completed";
-      return aKind === kind && isReady && aUrl;
+      const hasRendererMatch = !filter.renderer || a.metadata?.renderer === filter.renderer;
+      return aKind === kind && isReady && aUrl && hasRendererMatch;
     });
     if (!asset) return null;
     return { ...asset, url: asset.url || asset.storage_url };
   };
 
+  const getPreferredVideoAsset = (moduleId: string) =>
+    getReadyAsset(moduleId, "visual", { renderer: "manim" }) ?? getReadyAsset(moduleId, "visual");
+
   const hasAudio = currentModule ? !!getReadyAsset(currentModule.module_id, "audio") : false;
-  const hasVideo = currentModule ? !!getReadyAsset(currentModule.module_id, "visual") : false;
+
+  const watchQuickPrompt = "Create a 2 second, simple visual summary for this topic using basic shapes and one core idea.";
+
+  const clearQuickWatchState = () => {
+    setQuickWatchError(null);
+    setQuickWatchVideoUrl(null);
+  };
+
+  const handleGenerateQuickWatchVideo = async () => {
+    if (!currentModule || !currentModule.module_id || isGeneratingQuickWatch) return;
+
+    setIsGeneratingQuickWatch(true);
+    setLearningMode("watch");
+    setQuickWatchVideoUrl(null);
+    setQuickWatchError("Generating 2s clip...");
+    setViewMode("content");
+    try {
+      const response = await fetch(`/api/lesson/${lesson.id}/generate-short-video`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          module_id: currentModule.module_id,
+          prompt: watchQuickPrompt,
+        }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(typeof data.error === "string" ? data.error : "Unable to start quick video generation.");
+      }
+
+      const generatedAsset = data?.asset;
+      const generatedUrl = generatedAsset?.storage_url || generatedAsset?.url;
+      if (typeof generatedUrl === "string" && generatedUrl) {
+        setQuickWatchVideoUrl(resolveMediaSource(generatedUrl));
+        setQuickWatchError(null);
+        return;
+      }
+
+      const lessonAsset = Array.isArray(data?.lesson?.media_assets)
+        ? data.lesson.media_assets.find(
+            (asset: any) =>
+              asset?.module_id === currentModule.module_id &&
+              asset?.asset_type === "video" &&
+              (asset?.status === "ready" || asset?.status === "completed")
+          )
+        : null;
+      if (lessonAsset?.storage_url || lessonAsset?.url) {
+        setQuickWatchVideoUrl(
+          resolveMediaSource(lessonAsset.storage_url || lessonAsset.url || null)
+        );
+        setQuickWatchError(null);
+        return;
+      }
+
+      setQuickWatchError("Quick video generated but the URL isn't available yet. Polling lessons will update when ready.");
+    } catch (error) {
+      setQuickWatchError(error instanceof Error ? error.message : "Could not generate quick watch video.");
+    } finally {
+      setIsGeneratingQuickWatch(false);
+    }
+  };
+
+  const handleLearningModeSelect = (mode: LearningMode) => {
+    setLearningMode(mode);
+    setViewMode("content");
+    if (mode === "watch") {
+      setQuickWatchVideoUrl(HARDCODED_WATCH_VIDEO_URL);
+      setQuickWatchError(null);
+    }
+  };
+
+  useEffect(() => {
+    clearQuickWatchState();
+  }, [currentModule?.module_id]);
 
   const goToFinalTest = () => {
     if (typeof window !== "undefined") {
@@ -308,7 +407,7 @@ export function LessonPlayer({ lesson, profile }: LessonPlayerProps) {
     { id: "flashcards", label: "📇 Flashcards" },
     { id: "concept", label: "📖 Concept" },
     { id: "listen", label: "🎧 Listen", disabled: !hasAudio },
-    { id: "watch", label: "🎬 Watch", disabled: !hasVideo },
+    { id: "watch", label: "🎬 Watch" },
   ];
 
   return (
@@ -344,7 +443,7 @@ export function LessonPlayer({ lesson, profile }: LessonPlayerProps) {
                         key={t.id}
                         className={`step-item ${learningMode === t.id && viewMode === "content" ? "active" : ""}`}
                         style={{ cursor: "pointer" }}
-                        onClick={() => { setLearningMode(t.id); setViewMode("content"); }}
+                        onClick={() => handleLearningModeSelect(t.id)}
                       >
                         <span className="step-icon">{t.label.split(" ")[0]}</span>
                         {t.label.split(" ").slice(1).join(" ")}
@@ -391,15 +490,30 @@ export function LessonPlayer({ lesson, profile }: LessonPlayerProps) {
           {!isAllComplete && (
             <div className="mode-tabs">
               {tabs.map((tab) => (
-                <button
+                <div
                   key={tab.id}
-                  className={`mode-tab ${learningMode === tab.id ? "active" : ""}`}
-                  onClick={() => !tab.disabled && setLearningMode(tab.id)}
-                  disabled={tab.disabled}
-                  title={tab.disabled ? "Not available for this module" : undefined}
+                  style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem", flexWrap: "wrap" }}
                 >
-                  {tab.label}
-                </button>
+                  <button
+                    className={`mode-tab ${learningMode === tab.id ? "active" : ""}`}
+                    onClick={() => !tab.disabled && handleLearningModeSelect(tab.id)}
+                    disabled={tab.disabled}
+                    title={tab.disabled ? "Not available for this module" : undefined}
+                  >
+                    {tab.label}
+                  </button>
+                  {tab.id === "watch" && (
+                    <button
+                      className="button secondary"
+                      onClick={handleGenerateQuickWatchVideo}
+                      disabled={isGeneratingQuickWatch}
+                      title="Generate a very short Gemini-based sample watch clip"
+                      style={{ padding: "0.35rem 0.7rem", fontSize: "0.76rem" }}
+                    >
+                      {isGeneratingQuickWatch ? "Generating 2s clip..." : "Generate 2s clip"}
+                    </button>
+                  )}
+                </div>
               ))}
             </div>
           )}
@@ -456,23 +570,32 @@ export function LessonPlayer({ lesson, profile }: LessonPlayerProps) {
                   </div>
                 ) : (
                   <div style={{ textAlign: "center", padding: "2rem", color: "var(--ink-soft)" }}>
-                    Audio is still being generated…
+                    Audio is still being generated...
                   </div>
                 );
               })()}
 
               {learningMode === "watch" && currentModule && (() => {
-                const videoAsset = getReadyAsset(currentModule.module_id, "visual");
-                return videoAsset ? (
+              const videoAsset = getPreferredVideoAsset(currentModule.module_id);
+                const rawVideoUrl = quickWatchVideoUrl ?? videoAsset?.url;
+                const displayVideoUrl = resolveMediaSource(rawVideoUrl);
+                return videoAsset || quickWatchVideoUrl ? (
                   <div style={{ marginTop: "1.5rem" }}>
-                    <h3 style={{ margin: "0 0 1rem", fontSize: "1.1rem" }}>🎬 Animation — {currentModule.title}</h3>
+                    <h3 style={{ margin: "0 0 1rem", fontSize: "1.1rem" }}>
+                      🎬 Watch — {currentModule.title}
+                    </h3>
                     <video controls style={{ width: "100%", borderRadius: "12px", background: "#000" }}>
-                      <source src={videoAsset.url!} />
+                      <source src={displayVideoUrl} />
                     </video>
+                    {quickWatchError && (
+                      <p style={{ marginTop: "0.75rem", color: "var(--danger, #b3261e)", fontSize: "0.9rem" }}>
+                        {quickWatchError}
+                      </p>
+                    )}
                   </div>
                 ) : (
                   <div style={{ textAlign: "center", padding: "2rem", color: "var(--ink-soft)" }}>
-                    Animation is still being rendered…
+                    {quickWatchError || "Manim animation is still being rendered..."}
                   </div>
                 );
               })()}

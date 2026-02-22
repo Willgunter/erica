@@ -72,6 +72,23 @@ class LessonGenerationService:
     def get_lesson(self, lesson_id: str) -> dict[str, Any] | None:
         return self.repository.get(lesson_id)
 
+    def generate_short_visual_asset(
+        self,
+        lesson_id: str,
+        module: dict[str, Any],
+        profile: Profile,
+        prompt: str,
+        duration_seconds: int = 2,
+    ) -> dict[str, Any] | None:
+        asset = self.media_generator.generate_visual_asset(
+            lesson_id=lesson_id,
+            module=module,
+            profile=profile,
+            prompt=prompt,
+            duration_seconds=duration_seconds,
+        )
+        return self.repository.append_media_asset(lesson_id=lesson_id, asset=asset)
+
     def _submit_media_task(
         self,
         lesson_id: str,
