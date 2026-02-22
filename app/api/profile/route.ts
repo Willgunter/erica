@@ -35,6 +35,31 @@ function isAlreadyExists(errorMessage: string): boolean {
   return lowered.includes("already") || lowered.includes("exists");
 }
 
+function isTlsOrNetworkFetchError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  if (message.includes("fetch failed")) {
+    return true;
+  }
+
+  const cause = (error as Error & { cause?: unknown }).cause as { code?: unknown; message?: unknown } | undefined;
+  const code = typeof cause?.code === "string" ? cause.code : "";
+  const causeMessage = typeof cause?.message === "string" ? cause.message.toLowerCase() : "";
+
+  return (
+    code === "UNABLE_TO_GET_ISSUER_CERT_LOCALLY" ||
+    code === "SELF_SIGNED_CERT_IN_CHAIN" ||
+    code === "CERT_HAS_EXPIRED" ||
+    code === "DEPTH_ZERO_SELF_SIGNED_CERT" ||
+    code === "ECONNREFUSED" ||
+    code === "ENOTFOUND" ||
+    causeMessage.includes("certificate")
+  );
+}
+
 function isMissingProfileSchema(errorMessage: string | undefined): boolean {
   if (!errorMessage) {
     return false;
@@ -84,6 +109,14 @@ async function getDevProfile(userId: string): Promise<Record<string, unknown> | 
   return entry as Record<string, unknown>;
 }
 
+function buildDefaultDevProfile(userId: string): Record<string, unknown> {
+  const normalized = normalizeProfileInput({});
+  return {
+    user_id: userId,
+    ...normalized
+  };
+}
+
 async function ensureDevAuthUserExists(userId: string): Promise<{ error: string; status: number } | null> {
   if (process.env.NODE_ENV === "production") {
     return { error: "Unauthorized", status: 401 };
@@ -99,7 +132,23 @@ async function ensureDevAuthUserExists(userId: string): Promise<{ error: string;
     };
   }
 
-  const { data, error } = await serviceClient.auth.admin.getUserById(userId);
+  let data:
+    | {
+        user: unknown;
+      }
+    | null = null;
+  let error: { message: string } | null = null;
+  try {
+    const result = await serviceClient.auth.admin.getUserById(userId);
+    data = result.data as { user: unknown } | null;
+    error = result.error as { message: string } | null;
+  } catch (fetchError) {
+    if (isTlsOrNetworkFetchError(fetchError)) {
+      // Best-effort in local dev: skip remote auth bootstrap when TLS/network is unavailable.
+      return null;
+    }
+    return { error: fetchError instanceof Error ? fetchError.message : "Failed to access auth service", status: 500 };
+  }
   if (data?.user) {
     return null;
   }
@@ -108,13 +157,22 @@ async function ensureDevAuthUserExists(userId: string): Promise<{ error: string;
     return { error: error.message, status: 500 };
   }
 
-  const { error: createError } = await serviceClient.auth.admin.createUser({
-    id: userId,
-    email: `dev-${userId}@local.erica.test`,
-    password: `${userId.slice(0, 8)}Dev!123`,
-    email_confirm: true,
-    user_metadata: { source: "local-dev-profile" }
-  });
+  let createError: { message: string } | null = null;
+  try {
+    const created = await serviceClient.auth.admin.createUser({
+      id: userId,
+      email: `dev-${userId}@local.erica.test`,
+      password: `${userId.slice(0, 8)}Dev!123`,
+      email_confirm: true,
+      user_metadata: { source: "local-dev-profile" }
+    });
+    createError = created.error as { message: string } | null;
+  } catch (fetchError) {
+    if (isTlsOrNetworkFetchError(fetchError)) {
+      return null;
+    }
+    return { error: fetchError instanceof Error ? fetchError.message : "Failed to create auth user", status: 500 };
+  }
 
   if (createError && !isAlreadyExists(createError.message)) {
     return { error: createError.message, status: 500 };
@@ -126,7 +184,19 @@ async function ensureDevAuthUserExists(userId: string): Promise<{ error: string;
 export async function POST(request: Request) {
   const accessToken = getBearerToken(request.headers.get("authorization"));
   const devUserId = request.headers.get("x-dev-user-id");
-  const resolvedUser = await resolveUserId(accessToken, devUserId);
+  let resolvedUser: Awaited<ReturnType<typeof resolveUserId>>;
+  try {
+    resolvedUser = await resolveUserId(accessToken, devUserId);
+  } catch (error) {
+    if (process.env.NODE_ENV !== "production" && devUserId) {
+      resolvedUser = { userId: devUserId };
+    } else {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "Failed to resolve user" },
+        { status: 500 }
+      );
+    }
+  }
 
   if ("error" in resolvedUser) {
     return NextResponse.json({ error: resolvedUser.error }, { status: resolvedUser.status });
@@ -172,20 +242,36 @@ export async function POST(request: Request) {
     ? createSupabaseServiceClient()
     : createSupabaseClient(accessToken ?? undefined);
 
-  const { error: profileError } = await supabase.from("profiles").upsert(
-    {
-      user_id: resolvedUser.userId,
-      subject: normalized.subject,
-      goals: normalized.goals,
-      study_time: normalized.study_time,
-      pacing: normalized.pacing,
-      accessibility: normalized.accessibility
-    },
-    { onConflict: "user_id" }
-  );
+  let profileError: { message: string } | null = null;
+  try {
+    const profileResult = await supabase.from("profiles").upsert(
+      {
+        user_id: resolvedUser.userId,
+        subject: normalized.subject,
+        goals: normalized.goals,
+        study_time: normalized.study_time,
+        pacing: normalized.pacing,
+        accessibility: normalized.accessibility
+      },
+      { onConflict: "user_id" }
+    );
+    profileError = profileResult.error as { message: string } | null;
+  } catch (error) {
+    if (process.env.NODE_ENV !== "production" && useDevFallback && isTlsOrNetworkFetchError(error)) {
+      await saveDevProfile(resolvedUser.userId, profileForResponse);
+      return NextResponse.json({ profile: profileForResponse }, { status: 200 });
+    }
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Failed to persist profile" },
+      { status: 500 }
+    );
+  }
 
   if (profileError) {
-    if (process.env.NODE_ENV !== "production" && isMissingProfileSchema(profileError.message)) {
+    if (
+      process.env.NODE_ENV !== "production" &&
+      (isMissingProfileSchema(profileError.message) || useDevFallback)
+    ) {
       try {
         await saveDevProfile(resolvedUser.userId, profileForResponse);
         return NextResponse.json({ profile: profileForResponse }, { status: 200 });
@@ -199,19 +285,35 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: profileError.message }, { status: 500 });
   }
 
-  const { error: preferencesError } = await supabase.from("learning_preferences").upsert(
-    {
-      user_id: resolvedUser.userId,
-      teaching_style: normalized.learning_preferences.teaching_style,
-      content_formats: normalized.learning_preferences.content_formats,
-      review_preferences: normalized.learning_preferences.review_preferences,
-      uncertainty_flags: normalized.learning_preferences.uncertainty_flags
-    },
-    { onConflict: "user_id" }
-  );
+  let preferencesError: { message: string } | null = null;
+  try {
+    const preferenceResult = await supabase.from("learning_preferences").upsert(
+      {
+        user_id: resolvedUser.userId,
+        teaching_style: normalized.learning_preferences.teaching_style,
+        content_formats: normalized.learning_preferences.content_formats,
+        review_preferences: normalized.learning_preferences.review_preferences,
+        uncertainty_flags: normalized.learning_preferences.uncertainty_flags
+      },
+      { onConflict: "user_id" }
+    );
+    preferencesError = preferenceResult.error as { message: string } | null;
+  } catch (error) {
+    if (process.env.NODE_ENV !== "production" && useDevFallback && isTlsOrNetworkFetchError(error)) {
+      await saveDevProfile(resolvedUser.userId, profileForResponse);
+      return NextResponse.json({ profile: profileForResponse }, { status: 200 });
+    }
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Failed to persist learning preferences" },
+      { status: 500 }
+    );
+  }
 
   if (preferencesError) {
-    if (process.env.NODE_ENV !== "production" && isMissingProfileSchema(preferencesError.message)) {
+    if (
+      process.env.NODE_ENV !== "production" &&
+      (isMissingProfileSchema(preferencesError.message) || useDevFallback)
+    ) {
       try {
         await saveDevProfile(resolvedUser.userId, profileForResponse);
         return NextResponse.json({ profile: profileForResponse }, { status: 200 });
@@ -225,6 +327,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: preferencesError.message }, { status: 500 });
   }
 
+  if (useDevFallback) {
+    try {
+      await saveDevProfile(resolvedUser.userId, profileForResponse);
+    } catch (storeError) {
+      console.warn("[POST /api/profile] Failed to persist local dev profile copy:", storeError);
+    }
+  }
+
   return NextResponse.json(
     {
       profile: profileForResponse
@@ -236,7 +346,19 @@ export async function POST(request: Request) {
 export async function GET(request: Request) {
   const accessToken = getBearerToken(request.headers.get("authorization"));
   const devUserId = request.headers.get("x-dev-user-id");
-  const resolvedUser = await resolveUserId(accessToken, devUserId);
+  let resolvedUser: Awaited<ReturnType<typeof resolveUserId>>;
+  try {
+    resolvedUser = await resolveUserId(accessToken, devUserId);
+  } catch (error) {
+    if (process.env.NODE_ENV !== "production" && devUserId) {
+      resolvedUser = { userId: devUserId };
+    } else {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "Failed to resolve user" },
+        { status: 500 }
+      );
+    }
+  }
 
   if ("error" in resolvedUser) {
     return NextResponse.json({ error: resolvedUser.error }, { status: resolvedUser.status });
@@ -257,8 +379,12 @@ export async function GET(request: Request) {
     ? createSupabaseServiceClient()
     : createSupabaseClient(accessToken ?? undefined);
 
-  const [{ data: profileData, error: profileError }, { data: preferenceData, error: preferenceError }] =
-    await Promise.all([
+  let profileData: unknown = null;
+  let preferenceData: unknown = null;
+  let profileError: { message: string } | null = null;
+  let preferenceError: { message: string } | null = null;
+  try {
+    const [profileResult, preferenceResult] = await Promise.all([
       supabase.from("profiles").select("*").eq("user_id", resolvedUser.userId).maybeSingle(),
       supabase
         .from("learning_preferences")
@@ -266,6 +392,25 @@ export async function GET(request: Request) {
         .eq("user_id", resolvedUser.userId)
         .maybeSingle()
     ]);
+    profileData = profileResult.data;
+    preferenceData = preferenceResult.data;
+    profileError = profileResult.error as { message: string } | null;
+    preferenceError = preferenceResult.error as { message: string } | null;
+  } catch (error) {
+    if (process.env.NODE_ENV !== "production" && useDevFallback && isTlsOrNetworkFetchError(error)) {
+      const devProfile = await getDevProfile(resolvedUser.userId);
+      if (devProfile) {
+        return NextResponse.json({ profile: devProfile }, { status: 200 });
+      }
+      const seededProfile = buildDefaultDevProfile(resolvedUser.userId);
+      await saveDevProfile(resolvedUser.userId, seededProfile);
+      return NextResponse.json({ profile: seededProfile }, { status: 200 });
+    }
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Could not fetch profile" },
+      { status: 500 }
+    );
+  }
 
   if (profileError || preferenceError) {
     const maybeMissingSchemaMessage = profileError?.message ?? preferenceError?.message;
@@ -296,6 +441,11 @@ export async function GET(request: Request) {
       const devProfile = await getDevProfile(resolvedUser.userId);
       if (devProfile) {
         return NextResponse.json({ profile: devProfile }, { status: 200 });
+      }
+      if (useDevFallback) {
+        const seededProfile = buildDefaultDevProfile(resolvedUser.userId);
+        await saveDevProfile(resolvedUser.userId, seededProfile);
+        return NextResponse.json({ profile: seededProfile }, { status: 200 });
       }
     }
 

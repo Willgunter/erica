@@ -15,7 +15,7 @@ def _smart_slice(text: str, start: int, max_len: int) -> tuple[str, int]:
 
 
 def build_chunks(
-    units: list[dict], *, target_chars: int = 1200, overlap_chars: int = 200
+    units: list[dict], *, target_chars: int = 240, overlap_chars: int = 40
 ) -> list[dict]:
     chunks: list[dict] = []
     idx = 0
