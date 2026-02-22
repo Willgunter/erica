@@ -74,7 +74,27 @@ export default function UploadPage() {
       const data = await response.json();
 
       if (!response.ok) {
-        return { error: data.error || "Failed to parse file" };
+        const networkFailureText = Array.isArray(data.network_failures)
+          ? data.network_failures
+              .slice(0, 2)
+              .map((entry: any) => {
+                const target = typeof entry?.target === "string" ? entry.target : "unknown-target";
+                const reason = typeof entry?.message === "string" ? entry.message : "unknown network error";
+                return `${target} -> ${reason}`;
+              })
+              .join(" | ")
+          : "";
+        const requestIdText = typeof data.request_id === "string" && data.request_id.trim().length > 0
+          ? `request_id=${data.request_id}`
+          : "";
+
+        const detailText = [data.details, networkFailureText, data.hint, requestIdText]
+          .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+          .join(" ");
+        const message = typeof data.error === "string" && data.error.trim().length > 0
+          ? data.error
+          : "Failed to parse file";
+        return { error: detailText ? `${message} ${detailText}` : message };
       }
 
       return { chunks: data.chunks };

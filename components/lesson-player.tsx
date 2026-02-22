@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { KnowledgeCheck } from "./knowledge-check";
 
 interface Flashcard {
@@ -168,6 +169,7 @@ function ConceptView({ module }: { module: LessonModule }) {
 }
 
 export function LessonPlayer({ lesson, profile }: LessonPlayerProps) {
+  const router = useRouter();
   const [currentModuleIndex, setCurrentModuleIndex] = useState(0);
   const [viewMode, setViewMode] = useState<ViewMode>("content");
   const [learningMode, setLearningMode] = useState<LearningMode>("flashcards");
@@ -209,6 +211,7 @@ export function LessonPlayer({ lesson, profile }: LessonPlayerProps) {
       setViewMode("content");
     } else {
       setViewMode("content");
+      router.push("/test");
     }
   };
 
@@ -347,9 +350,7 @@ export function LessonPlayer({ lesson, profile }: LessonPlayerProps) {
               <button
                 className="button primary"
                 onClick={() => {
-                  if (typeof window !== "undefined") {
-                    window.location.href = "/test";
-                  }
+                  router.push("/test");
                 }}
                 style={{ fontSize: "1.1rem", padding: "0.8rem 2rem" }}
               >
