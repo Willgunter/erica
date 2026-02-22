@@ -8,6 +8,10 @@ function requireEnv(name: string): string {
   return value;
 }
 
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
 export function createSupabaseClient(accessToken?: string) {
   const supabaseUrl = requireEnv("NEXT_PUBLIC_SUPABASE_URL");
   const supabaseAnonKey = requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY");
@@ -17,6 +21,13 @@ export function createSupabaseClient(accessToken?: string) {
       headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {}
     }
   });
+}
+
+export function createSupabaseServiceClient() {
+  const supabaseUrl = requireEnv("NEXT_PUBLIC_SUPABASE_URL");
+  const supabaseServiceRoleKey = requireEnv("SUPABASE_SERVICE_ROLE_KEY");
+
+  return createClient(supabaseUrl, supabaseServiceRoleKey);
 }
 
 export async function resolveUserId(
@@ -35,6 +46,9 @@ export async function resolveUserId(
   }
 
   if (process.env.NODE_ENV !== "production" && devUserId) {
+    if (!isUuid(devUserId)) {
+      return { error: "Invalid x-dev-user-id header (expected UUID).", status: 400 };
+    }
     return { userId: devUserId };
   }
 

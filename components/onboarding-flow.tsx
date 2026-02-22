@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { createClient } from "@supabase/supabase-js";
 import type { AccessibilitySettings, ProfileInput } from "@/lib/profile";
 
 type StudyTime = "15_min" | "30_min" | "45_min" | "60_min_plus";
@@ -96,6 +97,81 @@ const defaultDraft: DraftProfile = {
   }
 };
 
+const SUPABASE_TOKEN_STORAGE_KEY = "supabaseAccessToken";
+const DEV_USER_ID_STORAGE_KEY = "supabaseDevUserId";
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function createBrowserSupabaseClient() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !supabaseAnonKey) {
+    throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY.");
+  }
+
+  return createClient(supabaseUrl, supabaseAnonKey);
+}
+
+async function ensureSupabaseAccessToken() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const existingToken = window.localStorage.getItem(SUPABASE_TOKEN_STORAGE_KEY);
+  if (existingToken) {
+    return existingToken;
+  }
+
+  const supabase = createBrowserSupabaseClient();
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError) {
+    throw new Error(sessionError.message);
+  }
+
+  const sessionToken = sessionData.session?.access_token ?? null;
+  if (sessionToken) {
+    window.localStorage.setItem(SUPABASE_TOKEN_STORAGE_KEY, sessionToken);
+    return sessionToken;
+  }
+
+  if (process.env.NODE_ENV === "production") {
+    return null;
+  }
+
+  const { data: anonymousData, error: anonymousError } = await supabase.auth.signInAnonymously();
+  if (anonymousError || !anonymousData.session?.access_token) {
+    throw new Error(
+      "Could not create a local Supabase session. Enable Anonymous sign-ins or sign in with a real user."
+    );
+  }
+
+  const token = anonymousData.session.access_token;
+  window.localStorage.setItem(SUPABASE_TOKEN_STORAGE_KEY, token);
+  return token;
+}
+
+function getOrCreateDevUserId() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const existing = window.localStorage.getItem(DEV_USER_ID_STORAGE_KEY);
+  if (existing && isUuid(existing)) {
+    return existing;
+  }
+
+  if (!window.crypto?.randomUUID) {
+    throw new Error("Cannot create local dev identity: browser does not support crypto.randomUUID().");
+  }
+
+  const userId = window.crypto.randomUUID();
+  window.localStorage.setItem(DEV_USER_ID_STORAGE_KEY, userId);
+  return userId;
+}
+
 function toggleChoice<T extends string>(values: T[], key: T) {
   if (values.includes(key)) {
     return values.filter((value) => value !== key);
@@ -167,17 +243,39 @@ export function OnboardingFlow() {
       accessibility: draft.accessibility
     };
 
-    const token = typeof window !== "undefined" ? window.localStorage.getItem("supabaseAccessToken") : null;
-
     try {
-      const response = await fetch("/api/profile", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {})
-        },
-        body: JSON.stringify(payload)
-      });
+      let token: string | null = null;
+      let devUserId: string | null = null;
+
+      try {
+        token = await ensureSupabaseAccessToken();
+      } catch (sessionError) {
+        if (process.env.NODE_ENV === "production") {
+          throw sessionError;
+        }
+        devUserId = getOrCreateDevUserId();
+      }
+
+      if (!token && !devUserId) {
+        throw new Error("No authenticated Supabase session. Sign in, then save your profile again.");
+      }
+
+      const submitRequest = async (currentToken: string | null, currentDevUserId: string | null) =>
+        fetch("/api/profile", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(currentToken ? { Authorization: `Bearer ${currentToken}` } : {}),
+            ...(currentDevUserId ? { "x-dev-user-id": currentDevUserId } : {})
+          },
+          body: JSON.stringify(payload)
+        });
+
+      let response = await submitRequest(token, devUserId);
+      if (response.status === 401 && process.env.NODE_ENV !== "production" && !devUserId) {
+        devUserId = getOrCreateDevUserId();
+        response = await submitRequest(null, devUserId);
+      }
 
       const data = (await response.json()) as {
         error?: string;
@@ -409,8 +507,8 @@ export function OnboardingFlow() {
             </div>
 
             <p className="helper">
-              Submission requires a signed-in Supabase session token in <code>localStorage.supabaseAccessToken</code>
-              or a dev header from your test client.
+              Local development uses a Supabase session when available and falls back to a dev identity if auth is not
+              configured. In production, submit requires a signed-in Supabase user session.
             </p>
 
             {result && (
