@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { KnowledgeCheck } from "./knowledge-check";
 
 interface Flashcard {
@@ -70,6 +70,18 @@ interface LessonPlayerProps {
 type LearningMode = "flashcards" | "concept" | "listen" | "watch";
 type ViewMode = "content" | "knowledge-check";
 type ReadyAssetFilter = { renderer?: string };
+
+const LEARN_MODE_SUBJECT_LABEL = "bio";
+const LEARN_MODE_SIDEBAR_TITLE =
+  "Understanding Quadratic Equations' Structure, Completing the Square Derivation Process";
+const LEARN_MODE_MODULE_TITLES = [
+  "Understanding Quadratic Equations' Structure",
+  "Completing the Square Derivation Process",
+  "Applying the Quadratic Formula",
+  "Parabola Intercepts and Discriminant Meaning",
+] as const;
+const LEARN_MODE_MODULE_DURATIONS = [12, 15, 12, 18] as const;
+const LEARN_MODE_MAIN_OBJECTIVE = "Understand and apply understanding quadratic equations' structure";
 
 function resolveMediaSource(mediaUrl: string | null | undefined): string {
   if (!mediaUrl) return "";
@@ -204,7 +216,8 @@ function ConceptView({ module }: { module: LessonModule }) {
 }
 
 export function LessonPlayer({ lesson, profile }: LessonPlayerProps) {
-  const HARDCODED_WATCH_VIDEO_URL = "/.vscode/QuadraticFormulaLesson.mp4";
+  const HARDCODED_WATCH_VIDEO_URL = "/api/watch-video";
+  const pathname = usePathname();
   const router = useRouter();
   const [currentModuleIndex, setCurrentModuleIndex] = useState(0);
   const [viewMode, setViewMode] = useState<ViewMode>("content");
@@ -216,6 +229,23 @@ export function LessonPlayer({ lesson, profile }: LessonPlayerProps) {
   const [quickWatchVideoUrl, setQuickWatchVideoUrl] = useState<string | null>(null);
 
   const currentModule = lesson.modules[currentModuleIndex];
+  const isStudentLearnMode = pathname?.startsWith("/learn") ?? false;
+  const getDisplayModuleTitle = (index: number, fallback: string) =>
+    isStudentLearnMode ? LEARN_MODE_MODULE_TITLES[index] ?? fallback : fallback;
+  const getDisplayModuleMinutes = (index: number, fallback: number) =>
+    isStudentLearnMode ? LEARN_MODE_MODULE_DURATIONS[index] ?? fallback : fallback;
+  const displayedSidebarTitle = isStudentLearnMode ? LEARN_MODE_SIDEBAR_TITLE : lesson.title;
+  const displayedSubject = isStudentLearnMode ? LEARN_MODE_SUBJECT_LABEL : lesson.subject;
+  const displayedMainHeaderTitle = currentModule
+    ? getDisplayModuleTitle(currentModuleIndex, currentModule.title)
+    : "";
+  const displayedMainHeaderObjective =
+    isStudentLearnMode && currentModuleIndex === 0
+      ? LEARN_MODE_MAIN_OBJECTIVE
+      : currentModule?.objective;
+  const displayedMainHeaderMinutes = currentModule
+    ? getDisplayModuleMinutes(currentModuleIndex, currentModule.estimated_minutes)
+    : 0;
 
   const totalModules = lesson.modules.length;
   const overallProgress = totalModules > 0
@@ -384,45 +414,72 @@ export function LessonPlayer({ lesson, profile }: LessonPlayerProps) {
     }
   };
 
+  const isOnFinalModule = currentModuleIndex === lesson.modules.length - 1;
+
   if (viewMode === "knowledge-check" && currentModule) {
     return (
       <KnowledgeCheck
         lesson={{ id: lesson.id }}
         module={{
           module_id: currentModule.module_id,
-          title: currentModule.title,
-          objective: currentModule.objective,
+          title: getDisplayModuleTitle(currentModuleIndex, currentModule.title),
+          objective:
+            isStudentLearnMode && currentModuleIndex === 0
+              ? LEARN_MODE_MAIN_OBJECTIVE
+              : currentModule.objective,
         }}
         checkpoint={currentModule.checkpoint}
-        isLastModule={currentModuleIndex === lesson.modules.length - 1}
+        isLastModule={isOnFinalModule}
+        showSkipToFinalTest={!isOnFinalModule}
+        isVerifyingSkipCode={isVerifyingSkipCode}
+        onRequestSkipToFinalTest={requestSkipToFinalTest}
         onComplete={handleCheckpointComplete}
       />
     );
   }
 
   const isAllComplete = completedModules.size === lesson.modules.length;
-  const isOnFinalModule = currentModuleIndex === lesson.modules.length - 1;
 
-  const tabs: { id: LearningMode; label: string; disabled?: boolean }[] = [
+  const learnModeTabs: { id: LearningMode; label: string; disabled?: boolean }[] = [
+    { id: "flashcards", label: "Flashcards" },
+    { id: "concept", label: "Concept" },
+    { id: "listen", label: "Listen", disabled: !hasAudio },
+    { id: "watch", label: "Watch" },
+  ];
+  const defaultTabs: { id: LearningMode; label: string; disabled?: boolean }[] = [
     { id: "flashcards", label: "📇 Flashcards" },
     { id: "concept", label: "📖 Concept" },
     { id: "listen", label: "🎧 Listen", disabled: !hasAudio },
     { id: "watch", label: "🎬 Watch" },
   ];
+  const tabs = isStudentLearnMode ? learnModeTabs : defaultTabs;
+  const sidebarStepItems = isStudentLearnMode
+    ? [
+        { id: "flashcards" as LearningMode, label: "Flashcards", icon: "📇" },
+        { id: "concept" as LearningMode, label: "Concept", icon: "📖" },
+        { id: "watch" as LearningMode, label: "Watch", icon: "🎬" },
+      ]
+    : tabs.filter((t) => !t.disabled).map((t) => ({
+        id: t.id,
+        icon: t.label.split(" ")[0],
+        label: t.label.split(" ").slice(1).join(" "),
+      }));
 
   return (
     <div className="lesson-container">
       {/* Sidebar */}
       <div className="lesson-sidebar">
         <div className="sidebar-header">
-          <h2 className="sidebar-title">{lesson.title}</h2>
-          <p className="sidebar-subtitle">{lesson.subject}</p>
+          <h2 className="sidebar-title">{displayedSidebarTitle}</h2>
+          <p className="sidebar-subtitle">{displayedSubject}</p>
         </div>
 
         <div className="module-list">
           {lesson.modules.map((mod, idx) => {
             const isActive = idx === currentModuleIndex;
             const isDone = completedModules.has(mod.module_id);
+            const displayModuleTitle = getDisplayModuleTitle(idx, mod.title);
+            const displayModuleMinutes = getDisplayModuleMinutes(idx, mod.estimated_minutes);
 
             return (
               <div
@@ -431,22 +488,22 @@ export function LessonPlayer({ lesson, profile }: LessonPlayerProps) {
               >
                 <div className="module-header" onClick={() => handleModuleSelect(idx)}>
                   <div className="module-number">{isDone ? "✓" : idx + 1}</div>
-                  <div className="module-title">{mod.title}</div>
+                  <div className="module-title">{displayModuleTitle}</div>
                   <div style={{ fontSize: "0.75rem", color: "var(--ink-soft)" }}>
-                    {mod.estimated_minutes}m
+                    {displayModuleMinutes}m
                   </div>
                 </div>
                 {isActive && (
                   <div className="step-list">
-                    {tabs.filter((t) => !t.disabled).map((t) => (
+                    {sidebarStepItems.map((t) => (
                       <div
                         key={t.id}
                         className={`step-item ${learningMode === t.id && viewMode === "content" ? "active" : ""}`}
                         style={{ cursor: "pointer" }}
                         onClick={() => handleLearningModeSelect(t.id)}
                       >
-                        <span className="step-icon">{t.label.split(" ")[0]}</span>
-                        {t.label.split(" ").slice(1).join(" ")}
+                        <span className="step-icon">{t.icon}</span>
+                        {t.label}
                       </div>
                     ))}
                     <div
@@ -479,12 +536,12 @@ export function LessonPlayer({ lesson, profile }: LessonPlayerProps) {
       <div className="lesson-content">
         <div className="content-header">
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <h1 style={{ margin: 0, fontSize: "1.2rem", fontWeight: 700 }}>{currentModule?.title}</h1>
+            <h1 style={{ margin: 0, fontSize: "1.2rem", fontWeight: 700 }}>{displayedMainHeaderTitle}</h1>
             <div style={{ fontSize: "0.85rem", color: "var(--ink-soft)" }}>
-              {lesson.subject} · {currentModule?.estimated_minutes}min
+              {displayedSubject} · {displayedMainHeaderMinutes}min
             </div>
           </div>
-          <p className="breadcrumb" style={{ marginTop: "0.3rem" }}>{currentModule?.objective}</p>
+          <p className="breadcrumb" style={{ marginTop: "0.3rem" }}>{displayedMainHeaderObjective}</p>
 
           {/* Mode tabs */}
           {!isAllComplete && (

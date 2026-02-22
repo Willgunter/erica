@@ -196,6 +196,7 @@ def record_checkpoint_answers(session: dict, answers: list[dict]) -> tuple[dict,
                 "is_correct": is_correct,
                 "hint": hint,
                 "answer": learner_answer,
+                "direct_answer": str(question.get("answer", "")).strip(),
             }
         )
 

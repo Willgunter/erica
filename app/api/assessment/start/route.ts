@@ -4,6 +4,10 @@ import { NextResponse } from "next/server";
 import type { AssessmentStartResponse, PracticeTrack, QuestionType } from "@/lib/assessment";
 import { assessmentStartRequestSchema } from "@/lib/assessment";
 import {
+  buildInternalQuestionsFromLesson,
+  serializeInternalQuestionsForSnapshot
+} from "@/lib/assessment-generated";
+import {
   buildAssessmentDefinition,
   inferTrackFromSubject,
   type AssessmentProfileConfig
@@ -12,6 +16,7 @@ import { saveDevAttempt, type DevAttemptRecord } from "@/lib/assessment-dev-stor
 import { createSupabaseClient, createSupabaseServiceClient, resolveUserId } from "@/lib/supabase";
 
 export const runtime = "nodejs";
+const FLASK_API_URL = process.env.FLASK_API_URL || "http://localhost:8000";
 
 function getBearerToken(headerValue: string | null): string | null {
   if (!headerValue) {
@@ -95,6 +100,58 @@ function isMissingProfileSchema(errorMessage: string | undefined): boolean {
 
   const lowered = errorMessage.toLowerCase();
   return lowered.includes("profiles") && lowered.includes("could not find");
+}
+
+function normalizeBaseUrl(url: string): string {
+  return url.replace(/\/+$/, "");
+}
+
+function buildCandidateBaseUrls(configuredBaseUrl: string): string[] {
+  return [
+    configuredBaseUrl,
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+    "http://localhost:5000",
+    "http://127.0.0.1:5000"
+  ]
+    .map((url) => normalizeBaseUrl(url).replace(/\/api\/?$/, ""))
+    .filter(Boolean)
+    .filter((url, index, all) => all.indexOf(url) === index);
+}
+
+async function fetchLessonForAssessment(lessonId: string): Promise<Record<string, unknown> | null> {
+  if (!lessonId || lessonId === "ad-hoc") {
+    return null;
+  }
+
+  const targets = buildCandidateBaseUrls(FLASK_API_URL).map(
+    (base) => `${base}/api/lesson/${encodeURIComponent(lessonId)}`
+  );
+
+  for (const target of targets) {
+    try {
+      const response = await fetch(target, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        cache: "no-store"
+      });
+
+      if (!response.ok) {
+        continue;
+      }
+
+      const payload = (await response.json()) as unknown;
+      if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+        return payload as Record<string, unknown>;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
 }
 
 type DbAssessmentProfileRow = {
@@ -363,9 +420,16 @@ export async function POST(request: Request) {
   const resolvedExamName = lessonOverrideRow?.exam_name_override ?? parsedRequest.data.exam_name ?? profileRow?.exam_name ?? null;
 
   const mergedProfileConfig = mergeProfileConfig(profileRow, lessonOverrideRow);
-  const definition = buildAssessmentDefinition(resolvedTrack, mergedProfileConfig);
+  const lessonSnapshot = await fetchLessonForAssessment(lessonId);
+  const generatedQuestions = buildInternalQuestionsFromLesson(lessonSnapshot);
+  const hasGeneratedQuestions = generatedQuestions.length > 0;
+  const definition = buildAssessmentDefinition(
+    resolvedTrack,
+    mergedProfileConfig,
+    hasGeneratedQuestions ? generatedQuestions : undefined
+  );
 
-  const allowedTypes = coerceQuestionTypes(profileRow?.allowed_question_types);
+  const allowedTypes = hasGeneratedQuestions ? [] : coerceQuestionTypes(profileRow?.allowed_question_types);
   let internalQuestions =
     allowedTypes.length > 0
       ? definition.internalQuestions.filter((question) => allowedTypes.includes(question.type))
@@ -390,9 +454,19 @@ export async function POST(request: Request) {
     .filter((question): question is AssessmentStartResponse["questions"][number] => Boolean(question));
 
   const activeQuestionTypes = new Set(internalQuestions.map((question) => question.type));
-  const sections = definition.sections.filter((section) =>
+  let sections = definition.sections.filter((section) =>
     section.question_types.some((type: QuestionType) => activeQuestionTypes.has(type))
   );
+  if (sections.length === 0 && activeQuestionTypes.size > 0) {
+    sections = [
+      {
+        id: "section-lesson-based",
+        title: "Lesson-based questions",
+        question_types: Array.from(activeQuestionTypes),
+        time_limit_seconds: null
+      }
+    ];
+  }
 
   const startedAt = new Date().toISOString();
   const attemptId = randomUUID();
@@ -425,7 +499,11 @@ export async function POST(request: Request) {
         : Array.from(new Set(internalQuestions.map((question) => question.type))),
     question_ids: internalQuestions.map((question) => question.id),
     sections,
-    question_type_order: lessonOverrideRow?.question_type_order ?? null
+    question_type_order: lessonOverrideRow?.question_type_order ?? null,
+    generated_questions:
+      hasGeneratedQuestions && internalQuestions.length > 0
+        ? serializeInternalQuestionsForSnapshot(internalQuestions)
+        : null
   };
 
   const attemptInsertPayload = {

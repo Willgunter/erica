@@ -29,6 +29,9 @@ interface KnowledgeCheckProps {
     questions: string[];
   };
   isLastModule?: boolean;
+  showSkipToFinalTest?: boolean;
+  isVerifyingSkipCode?: boolean;
+  onRequestSkipToFinalTest?: () => void;
   onComplete: (sessionId: string) => void;
 }
 
@@ -37,6 +40,9 @@ export function KnowledgeCheck({
   module,
   checkpoint,
   isLastModule = false,
+  showSkipToFinalTest = false,
+  isVerifyingSkipCode = false,
+  onRequestSkipToFinalTest,
   onComplete,
 }: KnowledgeCheckProps) {
   const router = useRouter();
@@ -139,6 +145,7 @@ export function KnowledgeCheck({
       let aiResponse: string | null = null;
       let isCorrect: boolean | null = null;
       let answerHint: string | null = null;
+      let directAnswer: string | null = null;
       let completed = false;
       let remainingIds: string[] = [];
 
@@ -157,15 +164,21 @@ export function KnowledgeCheck({
         aiResponse = data.ai_feedback || null;
         isCorrect = typeof data.is_correct === "boolean" ? data.is_correct : null;
         answerHint = typeof data.answer_hint === "string" && data.answer_hint.trim().length > 0 ? data.answer_hint : null;
+        directAnswer =
+          typeof data.direct_answer === "string" && data.direct_answer.trim().length > 0
+            ? data.direct_answer
+            : null;
         completed = data.completed || false;
         remainingIds = data.remaining_question_ids || [];
       }
 
-      const shouldAdvance = isCorrect !== false;
+      const shouldAdvance = directAnswer !== null || isCorrect !== false;
       const nextIndex = currentQuestionIndex + 1;
       const hasMore = nextIndex < sessionQuestions.length;
 
-      if (shouldAdvance) {
+      if (directAnswer) {
+        addMessage("erica", `**Direct answer:** ${directAnswer}`);
+      } else if (shouldAdvance) {
         if (aiResponse) {
           addMessage("erica", aiResponse);
         } else {
@@ -232,6 +245,18 @@ export function KnowledgeCheck({
           >
             Back to Profile
           </button>
+          {showSkipToFinalTest && onRequestSkipToFinalTest && (
+            <button
+              type="button"
+              className="button secondary"
+              style={{ marginTop: "0.75rem" }}
+              onClick={onRequestSkipToFinalTest}
+              disabled={isVerifyingSkipCode}
+              title="Requires demo confirmation code"
+            >
+              {isVerifyingSkipCode ? "Verifying code..." : "Skip to Final Test (Demo)"}
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -261,7 +286,7 @@ export function KnowledgeCheck({
         <div className="sparring-info">
           <p className="info-heading">How Erica spars</p>
           <p className="info-text">
-            She asks questions from your actual material, checks each answer, and gives you hints to tighten your understanding.
+            She asks questions from your actual material and gives the direct answer right after each response.
           </p>
         </div>
 
@@ -273,6 +298,17 @@ export function KnowledgeCheck({
           >
             Back to Profile
           </button>
+          {showSkipToFinalTest && onRequestSkipToFinalTest && (
+            <button
+              className="button secondary"
+              style={{ width: "100%", marginTop: "0.6rem" }}
+              onClick={onRequestSkipToFinalTest}
+              disabled={isVerifyingSkipCode}
+              title="Requires demo confirmation code"
+            >
+              {isVerifyingSkipCode ? "Verifying code..." : "Skip to Final Test (Demo)"}
+            </button>
+          )}
         </div>
 
         {currentQuestion?.hints && currentQuestion.hints.length > 0 && !isCompleted && (

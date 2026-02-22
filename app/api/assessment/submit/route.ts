@@ -7,6 +7,7 @@ import type {
   ReviewedAssessmentItem
 } from "@/lib/assessment";
 import { assessmentSubmitRequestSchema } from "@/lib/assessment";
+import { parseInternalQuestionsFromSnapshot } from "@/lib/assessment-generated";
 import {
   buildAssessmentDefinition,
   inferTrackFromSubject,
@@ -123,6 +124,38 @@ function parseStringArray(value: unknown): string[] {
   return value.filter((entry): entry is string => typeof entry === "string");
 }
 
+function parseSnapshotSections(value: unknown): AssessmentSection[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((entry) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+        return null;
+      }
+
+      const section = entry as Record<string, unknown>;
+      const id = typeof section.id === "string" ? section.id.trim() : "";
+      const title = typeof section.title === "string" ? section.title.trim() : "";
+      const questionTypes = coerceQuestionTypes(section.question_types);
+      const timeLimit =
+        typeof section.time_limit_seconds === "number" ? section.time_limit_seconds : section.time_limit_seconds === null ? null : null;
+
+      if (!id || !title || questionTypes.length === 0) {
+        return null;
+      }
+
+      return {
+        id,
+        title,
+        question_types: questionTypes,
+        time_limit_seconds: timeLimit
+      } satisfies AssessmentSection;
+    })
+    .filter((section): section is AssessmentSection => Boolean(section));
+}
+
 type DbAttemptRow = {
   id: string;
   user_id: string;
@@ -192,9 +225,23 @@ function applySnapshotFilters(args: {
     );
 
   const activeTypes = new Set(internalQuestions.map((question) => question.type));
-  const sections = args.definition.sections.filter((section) =>
+  const snapshotSections = parseSnapshotSections(args.configSnapshot?.sections);
+  let sections = args.definition.sections.filter((section) =>
     section.question_types.some((type: QuestionType) => activeTypes.has(type))
   );
+  if (sections.length === 0 && snapshotSections.length > 0) {
+    sections = snapshotSections;
+  }
+  if (sections.length === 0 && activeTypes.size > 0) {
+    sections = [
+      {
+        id: "section-assessment",
+        title: "Assessment",
+        question_types: Array.from(activeTypes),
+        time_limit_seconds: null
+      }
+    ];
+  }
 
   return {
     questions,
@@ -310,7 +357,12 @@ export async function POST(request: Request) {
   }
 
   const practiceTrack = parsePracticeTrack(attempt.practice_track, attempt.subject);
-  const definition = buildAssessmentDefinition(practiceTrack, resolveProfileConfig(attempt.config_snapshot));
+  const generatedQuestions = parseInternalQuestionsFromSnapshot(attempt.config_snapshot?.generated_questions);
+  const definition = buildAssessmentDefinition(
+    practiceTrack,
+    resolveProfileConfig(attempt.config_snapshot),
+    generatedQuestions.length > 0 ? generatedQuestions : undefined
+  );
   const filtered = applySnapshotFilters({ definition, configSnapshot: attempt.config_snapshot });
 
   const scoreResult = scoreAssessmentSubmission({

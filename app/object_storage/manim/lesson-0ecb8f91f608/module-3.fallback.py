@@ -1,0 +1,63 @@
+from manim import *
+
+class LessonScene(Scene):
+    def construct(self):
+        self.camera.background_color = '#0B1021'
+        grid = NumberPlane(
+            x_range=[-8, 8, 1],
+            y_range=[-4.5, 4.5, 1],
+            x_length=14,
+            y_length=8,
+            background_line_style={'stroke_color': BLUE_E, 'stroke_opacity': 0.35, 'stroke_width': 1}
+        )
+        self.play(FadeIn(grid), run_time=0.8)
+        title = Text('Geometric Meaning and Discriminant', font_size=52, color=BLUE_B, weight=BOLD)
+        title.to_edge(UP)
+        underline = Line(title.get_left() + DOWN * 0.2, title.get_right() + DOWN * 0.2, color=YELLOW_B)
+        self.play(FadeIn(title, shift=UP * 0.2), Create(underline), run_time=1.2)
+        objective = Text('Understand and apply geometric meaning and discriminant', font_size=26, color=GREY_A)
+        objective.next_to(title, DOWN, buff=0.45)
+        self.play(Write(objective), run_time=0.9)
+        self.wait(0.6)
+        self.play(FadeOut(objective), run_time=0.5)
+        step_title = Text('Concept Walkthrough', font_size=34, color=BLUE_C).to_edge(UP)
+        content = Text('This module connects the algebraic solutions of a quadratic equation to its graphical representation as a parabola. The ', font_size=25, color=GREY_A, line_spacing=0.9)
+        content.next_to(step_title, DOWN, buff=0.5)
+        frame = RoundedRectangle(corner_radius=0.18, width=12.2, height=2.3)
+        frame.set_stroke(BLUE_D, width=2)
+        frame.move_to(content)
+        pulse = Dot(point=frame.get_left(), color=YELLOW_B).scale(0.7)
+        self.play(FadeTransform(title.copy(), step_title), run_time=0.7)
+        self.play(Create(frame), Write(content), FadeIn(pulse), run_time=1.1)
+        self.play(pulse.animate.move_to(frame.get_right()), content.animate.set_color(YELLOW_A), run_time=0.8)
+        self.wait(0.5)
+        self.play(FadeOut(step_title), FadeOut(content), FadeOut(frame), FadeOut(pulse), run_time=0.6)
+        step_title = Text('Guided Practice', font_size=34, color=BLUE_C).to_edge(UP)
+        content = Text('Review the flashcards for Geometric Meaning and Discriminant. Try to explain each concept back in your own words before ', font_size=25, color=GREY_A, line_spacing=0.9)
+        content.next_to(step_title, DOWN, buff=0.5)
+        frame = RoundedRectangle(corner_radius=0.18, width=12.2, height=2.3)
+        frame.set_stroke(BLUE_D, width=2)
+        frame.move_to(content)
+        pulse = Dot(point=frame.get_left(), color=YELLOW_B).scale(0.7)
+        self.play(FadeTransform(title.copy(), step_title), run_time=0.7)
+        self.play(Create(frame), Write(content), FadeIn(pulse), run_time=1.1)
+        self.play(pulse.animate.move_to(frame.get_right()), content.animate.set_color(YELLOW_A), run_time=0.8)
+        self.wait(0.5)
+        self.play(FadeOut(step_title), FadeOut(content), FadeOut(frame), FadeOut(pulse), run_time=0.6)
+        step_title = Text('AI Spar', font_size=34, color=BLUE_C).to_edge(UP)
+        content = Text('Test your understanding with Erica. She will ask you questions from the practice exam and guide you to the right answers', font_size=25, color=GREY_A, line_spacing=0.9)
+        content.next_to(step_title, DOWN, buff=0.5)
+        frame = RoundedRectangle(corner_radius=0.18, width=12.2, height=2.3)
+        frame.set_stroke(BLUE_D, width=2)
+        frame.move_to(content)
+        pulse = Dot(point=frame.get_left(), color=YELLOW_B).scale(0.7)
+        self.play(FadeTransform(title.copy(), step_title), run_time=0.7)
+        self.play(Create(frame), Write(content), FadeIn(pulse), run_time=1.1)
+        self.play(pulse.animate.move_to(frame.get_right()), content.animate.set_color(YELLOW_A), run_time=0.8)
+        self.wait(0.5)
+        self.play(FadeOut(step_title), FadeOut(content), FadeOut(frame), FadeOut(pulse), run_time=0.6)
+        recap = Text('Recap: visualize the structure, then apply it.', font_size=30, color=YELLOW_B)
+        recap.to_edge(DOWN)
+        self.play(Write(recap), run_time=0.8)
+        self.wait(0.9)
+        self.play(FadeOut(recap), FadeOut(title), FadeOut(underline), FadeOut(grid), run_time=0.8)

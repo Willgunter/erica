@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -102,10 +103,10 @@ class MediaGenerator:
                     else self._manim_script_fallback(module, profile)
                 )
 
-            if not self.latex_available and self._script_uses_latex(script):
-                primary_render_error = "Skipped AI script: LaTeX is unavailable and script uses Tex/MathTex."
+            if not self.latex_available:
+                primary_render_error = "Skipped AI script: LaTeX executable not found on host."
                 _logger.warning(
-                    "[MediaGenerator] Skipping primary AI render due to missing LaTeX | lesson=%s module=%s",
+                    "[MediaGenerator] Skipping primary AI render because LaTeX is unavailable | lesson=%s module=%s",
                     lesson_id,
                     module_id,
                 )
@@ -495,12 +496,19 @@ Provide ONLY the Python code, no explanations. Start with 'from manim import *'.
     def _sanitize_manim_script(self, script: str) -> str:
         """Normalize common LLM-generated Manim mistakes before rendering."""
         sanitized = script
+        sanitized = re.sub(r"\.get_graph\s*\(", ".plot(", sanitized)
+        sanitized = re.sub(r",\s*length\s*=\s*[A-Za-z_][A-Za-z0-9_\.]*", "", sanitized)
         for accessor in ("get_center", "get_left", "get_right", "get_top", "get_bottom", "get_start", "get_end"):
             sanitized = re.sub(
                 rf"\.{accessor}(?!\s*\()",
                 f".{accessor}()",
                 sanitized,
             )
+        if "np." in sanitized and "import numpy as np" not in sanitized:
+            if "from manim import *" in sanitized:
+                sanitized = sanitized.replace("from manim import *", "from manim import *\nimport numpy as np", 1)
+            else:
+                sanitized = f"import numpy as np\n{sanitized}"
         if not self.latex_available:
             sanitized = re.sub(r"\bMathTex\s*\(", "Text(", sanitized)
             sanitized = re.sub(r"\bTex\s*\(", "Text(", sanitized)
@@ -512,6 +520,12 @@ Provide ONLY the Python code, no explanations. Start with 'from manim import *'.
     def _script_uses_latex(self, script: str) -> bool:
         return bool(re.search(r"\b(MathTex|Tex|TransformMatchingTex)\s*\(", script))
     
+    def _build_manim_command(self, script_path: Path, scene_name: str) -> list[str]:
+        manim_executable = shutil.which("manim")
+        if manim_executable:
+            return [manim_executable, "-ql", "--format=mp4", str(script_path), scene_name]
+        return [sys.executable, "-m", "manim", "-ql", "--format=mp4", str(script_path), scene_name]
+
     def _render_manim_video(self, script: str, *, timeout_seconds: int = 60) -> bytes:
         """Render Manim script to video."""
         script = self._sanitize_manim_script(script)
@@ -523,7 +537,7 @@ Provide ONLY the Python code, no explanations. Start with 'from manim import *'.
         with tempfile.TemporaryDirectory() as tmpdir:
             script_path = Path(tmpdir) / "scene.py"
             script_path.write_text(script)
-            command = ["manim", "-ql", "--format=mp4", str(script_path), scene_name]
+            command = self._build_manim_command(script_path, scene_name)
             _logger.debug(
                 "[MediaGenerator] Running manim | scene=%s classes=%s cmd=%s cwd=%s",
                 scene_name,
@@ -588,14 +602,14 @@ Provide ONLY the Python code, no explanations. Start with 'from manim import *'.
 
                 raise Exception(f"Video file not generated at expected path: {video_path}")
             except subprocess.TimeoutExpired:
-                _logger.exception(
+                _logger.warning(
                     "[MediaGenerator] Manim rendering timeout | scene=%s timeout_seconds=%s",
                     scene_name,
                     timeout_seconds,
                 )
                 raise Exception("Manim rendering timeout")
             except Exception as e:
-                _logger.exception("[MediaGenerator] Manim rendering failed | scene=%s", scene_name)
+                _logger.warning("[MediaGenerator] Manim rendering failed | scene=%s error=%s", scene_name, e)
                 raise Exception(f"Manim rendering failed: {str(e)}")
     
     def _generate_podcast_script_with_ai(self, module: dict[str, Any], profile: Profile) -> dict[str, Any]:

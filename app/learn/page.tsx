@@ -304,6 +304,13 @@ export default function LearnPage() {
       
       if (lessonData.id) {
         sessionStorage.setItem("erica_lesson_id", lessonData.id);
+        sessionStorage.setItem(
+          "erica_lesson_snapshot",
+          JSON.stringify({
+            id: lessonData.id,
+            subject: lessonData.subject || profileData.subject || "General learning"
+          })
+        );
       }
 
       if (lessonData.modules && lessonData.modules.length > 0) {
@@ -426,6 +433,13 @@ export default function LearnPage() {
 
       const data = (await response.json()) as Lesson;
       setLesson(data);
+      sessionStorage.setItem(
+        "erica_lesson_snapshot",
+        JSON.stringify({
+          id: data.id,
+          subject: data.subject || profile?.subject || "General learning"
+        })
+      );
 
       if (data.status === "completed") {
         setStatus("ready");

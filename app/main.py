@@ -304,6 +304,7 @@ def create_app() -> Flask:
                     "ai_feedback": ai_response,
                     "is_correct": latest_answer_result.get("is_correct"),
                     "answer_hint": latest_answer_result.get("hint"),
+                    "direct_answer": latest_answer_result.get("direct_answer"),
                 }
             )
 

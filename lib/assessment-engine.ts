@@ -629,7 +629,8 @@ export function inferTrackFromSubject(subject: string | null | undefined): Pract
 
 export function buildAssessmentDefinition(
   practiceTrack: PracticeTrack,
-  profileConfig?: Partial<AssessmentProfileConfig>
+  profileConfig?: Partial<AssessmentProfileConfig>,
+  internalQuestionOverrides?: AssessmentDefinition["internalQuestions"]
 ): AssessmentDefinition {
   const baseProfile: AssessmentProfileConfig =
     practiceTrack === "computer_science"
@@ -668,11 +669,13 @@ export function buildAssessmentDefinition(
   };
 
   const internalQuestions: AssessmentQuestionInternal[] =
-    practiceTrack === "computer_science"
-      ? [...CS_MCQ_QUESTIONS, ...CS_CODE_QUESTIONS]
-      : practiceTrack === "biology"
-        ? [...BIO_MCQ_QUESTIONS, ...BIO_WRITTEN_QUESTIONS]
-        : [...GENERAL_MCQ_QUESTIONS];
+    Array.isArray(internalQuestionOverrides) && internalQuestionOverrides.length > 0
+      ? [...internalQuestionOverrides]
+      : practiceTrack === "computer_science"
+        ? [...CS_MCQ_QUESTIONS, ...CS_CODE_QUESTIONS]
+        : practiceTrack === "biology"
+          ? [...BIO_MCQ_QUESTIONS, ...BIO_WRITTEN_QUESTIONS]
+          : [...GENERAL_MCQ_QUESTIONS];
 
   return {
     practiceTrack,
