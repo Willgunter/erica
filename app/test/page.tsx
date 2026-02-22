@@ -3,11 +3,27 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
+type RawQuestion = {
+  id?: string;
+  question_id?: string;
+  prompt?: string;
+  question_text?: string;
+  choices?: string[];
+};
+
 type Question = {
-  question_id: string;
-  question_text: string;
+  id: string;
+  prompt: string;
   choices: string[];
-  correct_answer: number;
+};
+
+type RawTestSessionResponse = {
+  test_id?: string;
+  questions?: RawQuestion[];
+  coverage?: {
+    module_ids?: string[];
+    topics?: string[];
+  };
 };
 
 type TestSession = {
@@ -19,9 +35,64 @@ type TestSession = {
   };
 };
 
+type RawTestSubmitResponse = {
+  test_id?: string;
+  completed?: boolean;
+  message?: string;
+  score?: {
+    correct?: number;
+    total?: number;
+    percentage?: number;
+  };
+  feedback?: {
+    summary?: string;
+    strong_topics?: string[];
+    focus_topics?: string[];
+  };
+  breakdown?: Array<{
+    question_id: string;
+    correct: boolean;
+    selected: number;
+    correct_answer: number;
+  }>;
+};
+
+type StoredTestResult = {
+  test_id: string;
+  score: number;
+  correct: number;
+  total: number;
+  breakdown: Array<{
+    question_id: string;
+    correct: boolean;
+    selected: number;
+    correct_answer: number;
+  }>;
+  feedback?: {
+    summary?: string;
+    strong_topics?: string[];
+    focus_topics?: string[];
+  };
+};
+
+function normalizeQuestion(question: RawQuestion, index: number): Question {
+  const rawId = question.id ?? question.question_id;
+  const id = typeof rawId === "string" && rawId.trim().length > 0 ? rawId : `q-${index + 1}`;
+  const rawPrompt = question.prompt ?? question.question_text;
+  const prompt =
+    typeof rawPrompt === "string" && rawPrompt.trim().length > 0
+      ? rawPrompt
+      : `Question ${index + 1}`;
+  const choices = Array.isArray(question.choices)
+    ? question.choices.filter((choice): choice is string => typeof choice === "string")
+    : [];
+
+  return { id, prompt, choices };
+}
+
 export default function TestPage() {
   const router = useRouter();
-  const [status, setStatus] = useState<"loading" | "ready" | "submitted" | "error">("loading");
+  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [testSession, setTestSession] = useState<TestSession | null>(null);
   const [answers, setAnswers] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
@@ -33,18 +104,29 @@ export default function TestPage() {
   const initializeTest = async () => {
     try {
       const lessonId = sessionStorage.getItem("erica_lesson_id");
-      if (!lessonId) {
+      const lessonSnapshot = sessionStorage.getItem("erica_lesson_snapshot");
+      let lessonData: unknown = null;
+
+      if (lessonId) {
+        const lessonResponse = await fetch(`/api/lesson/${lessonId}`);
+        if (lessonResponse.ok) {
+          lessonData = await lessonResponse.json();
+        }
+      }
+
+      if (!lessonData && lessonSnapshot) {
+        try {
+          lessonData = JSON.parse(lessonSnapshot);
+        } catch {
+          // Ignore malformed snapshot and surface the primary missing-lesson error below.
+        }
+      }
+
+      if (!lessonData || typeof lessonData !== "object") {
         setError("No lesson found. Please complete the learning modules first.");
         setStatus("error");
         return;
       }
-
-      const lessonResponse = await fetch(`/api/lesson/${lessonId}`);
-      if (!lessonResponse.ok) {
-        throw new Error("Failed to load lesson");
-      }
-
-      const lessonData = await lessonResponse.json();
 
       const testResponse = await fetch("/api/test/start", {
         method: "POST",
@@ -56,8 +138,25 @@ export default function TestPage() {
         throw new Error("Failed to start test");
       }
 
-      const testData = await testResponse.json();
-      setTestSession(testData);
+      const rawTestData = (await testResponse.json()) as RawTestSessionResponse;
+      const normalizedQuestions = Array.isArray(rawTestData.questions)
+        ? rawTestData.questions.map((question, index) => normalizeQuestion(question, index))
+        : [];
+
+      if (!rawTestData.test_id || normalizedQuestions.length === 0) {
+        throw new Error("No test questions were generated for this lesson.");
+      }
+
+      setTestSession({
+        test_id: rawTestData.test_id,
+        questions: normalizedQuestions,
+        coverage: {
+          module_ids: rawTestData.coverage?.module_ids ?? [],
+          topics: rawTestData.coverage?.topics ?? []
+        }
+      });
+      setAnswers({});
+      setError(null);
       setStatus("ready");
     } catch (err) {
       console.error("Test initialization error:", err);
@@ -74,11 +173,12 @@ export default function TestPage() {
     if (!testSession) return;
 
     const answerArray = testSession.questions.map((q) => ({
-      question_id: q.question_id,
-      selected_answer: answers[q.question_id] ?? -1
+      question_id: q.id,
+      choice_index: answers[q.id] ?? -1
     }));
 
     try {
+      setError(null);
       const response = await fetch("/api/test/submit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -88,12 +188,27 @@ export default function TestPage() {
         })
       });
 
+      const result = (await response.json()) as RawTestSubmitResponse;
+
       if (!response.ok) {
-        throw new Error("Failed to submit test");
+        throw new Error(result.message || "Failed to submit test");
       }
 
-      const result = await response.json();
-      sessionStorage.setItem("erica_test_result", JSON.stringify(result));
+      if (!result.completed) {
+        setError(result.message || "Please answer all questions before submitting.");
+        return;
+      }
+
+      const normalizedResult: StoredTestResult = {
+        test_id: result.test_id ?? testSession.test_id,
+        score: Number(result.score?.percentage ?? 0),
+        correct: Number(result.score?.correct ?? 0),
+        total: Number(result.score?.total ?? testSession.questions.length),
+        breakdown: Array.isArray(result.breakdown) ? result.breakdown : [],
+        feedback: result.feedback
+      };
+
+      sessionStorage.setItem("erica_test_result", JSON.stringify(normalizedResult));
       router.push("/summary");
     } catch (err) {
       console.error("Test submission error:", err);
@@ -101,9 +216,14 @@ export default function TestPage() {
     }
   };
 
-  const answeredCount = Object.keys(answers).length;
+  const answeredCount = testSession
+    ? testSession.questions.reduce(
+        (count, question) => (typeof answers[question.id] === "number" ? count + 1 : count),
+        0
+      )
+    : 0;
   const totalQuestions = testSession?.questions.length || 0;
-  const canSubmit = answeredCount === totalQuestions;
+  const canSubmit = totalQuestions > 0 && answeredCount === totalQuestions;
 
   if (status === "loading") {
     return (
@@ -166,17 +286,17 @@ export default function TestPage() {
 
           <div className="test-questions">
             {testSession?.questions.map((question, idx) => (
-              <div key={question.question_id} className="test-question">
+              <div key={question.id} className="test-question">
                 <h3 className="question-number">Question {idx + 1}</h3>
-                <p className="question-text">{question.question_text}</p>
+                <p className="question-text">{question.prompt}</p>
                 <div className="question-choices">
                   {question.choices.map((choice, choiceIdx) => (
                     <label key={choiceIdx} className="choice-label">
                       <input
                         type="radio"
-                        name={question.question_id}
-                        checked={answers[question.question_id] === choiceIdx}
-                        onChange={() => handleAnswerChange(question.question_id, choiceIdx)}
+                        name={question.id}
+                        checked={answers[question.id] === choiceIdx}
+                        onChange={() => handleAnswerChange(question.id, choiceIdx)}
                       />
                       <span>{choice}</span>
                     </label>
@@ -190,6 +310,7 @@ export default function TestPage() {
             <p className="helper">
               {answeredCount} of {totalQuestions} questions answered
             </p>
+            {error && <p className="error" style={{ marginTop: "0.5rem" }}>{error}</p>}
           </div>
         </article>
 

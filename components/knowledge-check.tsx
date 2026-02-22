@@ -27,6 +27,7 @@ interface KnowledgeCheckProps {
     checkpoint_id: string;
     questions: string[];
   };
+  isLastModule?: boolean;
   onComplete: (sessionId: string) => void;
 }
 
@@ -34,6 +35,7 @@ export function KnowledgeCheck({
   lesson,
   module,
   checkpoint,
+  isLastModule = false,
   onComplete,
 }: KnowledgeCheckProps) {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -353,7 +355,7 @@ export function KnowledgeCheck({
                 style={{ width: "100%" }}
                 onClick={() => onComplete(sessionId || "")}
               >
-                Continue to Next Module →
+                {isLastModule ? "Continue to Final Test →" : "Continue to Next Module →"}
               </button>
             </div>
           )}

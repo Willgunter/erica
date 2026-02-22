@@ -196,6 +196,7 @@ export function LessonPlayer({ lesson, profile }: LessonPlayerProps) {
   const [viewMode, setViewMode] = useState<ViewMode>("content");
   const [learningMode, setLearningMode] = useState<LearningMode>("flashcards");
   const [completedModules, setCompletedModules] = useState<Set<string>>(new Set());
+  const [isVerifyingSkipCode, setIsVerifyingSkipCode] = useState(false);
 
   const currentModule = lesson.modules[currentModuleIndex];
 
@@ -223,6 +224,14 @@ export function LessonPlayer({ lesson, profile }: LessonPlayerProps) {
   const hasAudio = currentModule ? !!getReadyAsset(currentModule.module_id, "audio") : false;
   const hasVideo = currentModule ? !!getReadyAsset(currentModule.module_id, "visual") : false;
 
+  const goToFinalTest = () => {
+    if (typeof window !== "undefined") {
+      window.sessionStorage.setItem("erica_lesson_id", lesson.id);
+      window.sessionStorage.setItem("erica_lesson_snapshot", JSON.stringify(lesson));
+    }
+    router.push("/test");
+  };
+
   const handleCheckpointComplete = (_sessionId: string) => {
     setCompletedModules((prev) => new Set([...prev, currentModule.module_id]));
 
@@ -233,7 +242,7 @@ export function LessonPlayer({ lesson, profile }: LessonPlayerProps) {
       setViewMode("content");
     } else {
       setViewMode("content");
-      router.push("/test");
+      goToFinalTest();
     }
   };
 
@@ -241,6 +250,39 @@ export function LessonPlayer({ lesson, profile }: LessonPlayerProps) {
     setCurrentModuleIndex(index);
     setLearningMode("flashcards");
     setViewMode("content");
+  };
+
+  const requestSkipToFinalTest = async () => {
+    if (isVerifyingSkipCode || typeof window === "undefined") return;
+
+    const confirmed = window.confirm(
+      "Skip the remaining modules and go directly to the final test? This is intended for demo use only."
+    );
+    if (!confirmed) return;
+
+    const code = window.prompt("Enter demo confirmation code");
+    if (!code) return;
+
+    setIsVerifyingSkipCode(true);
+    try {
+      const response = await fetch("/api/test/skip-verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      const data = await response.json();
+
+      if (!response.ok || !data.ok) {
+        window.alert(typeof data.error === "string" ? data.error : "Invalid demo confirmation code.");
+        return;
+      }
+
+      goToFinalTest();
+    } catch {
+      window.alert("Unable to verify demo confirmation code right now.");
+    } finally {
+      setIsVerifyingSkipCode(false);
+    }
   };
 
   if (viewMode === "knowledge-check" && currentModule) {
@@ -253,12 +295,14 @@ export function LessonPlayer({ lesson, profile }: LessonPlayerProps) {
           objective: currentModule.objective,
         }}
         checkpoint={currentModule.checkpoint}
+        isLastModule={currentModuleIndex === lesson.modules.length - 1}
         onComplete={handleCheckpointComplete}
       />
     );
   }
 
   const isAllComplete = completedModules.size === lesson.modules.length;
+  const isOnFinalModule = currentModuleIndex === lesson.modules.length - 1;
 
   const tabs: { id: LearningMode; label: string; disabled?: boolean }[] = [
     { id: "flashcards", label: "📇 Flashcards" },
@@ -371,9 +415,7 @@ export function LessonPlayer({ lesson, profile }: LessonPlayerProps) {
               </p>
               <button
                 className="button primary"
-                onClick={() => {
-                  router.push("/test");
-                }}
+                onClick={goToFinalTest}
                 style={{ fontSize: "1.1rem", padding: "0.8rem 2rem" }}
               >
                 Continue to Final Test →
@@ -431,6 +473,16 @@ export function LessonPlayer({ lesson, profile }: LessonPlayerProps) {
               <div style={{ flex: 1, fontSize: "0.88rem", color: "var(--ink-soft)" }}>
                 Module {currentModuleIndex + 1} of {lesson.modules.length}
               </div>
+              {!isOnFinalModule && (
+                <button
+                  className="button secondary"
+                  onClick={requestSkipToFinalTest}
+                  disabled={isVerifyingSkipCode}
+                  title="Requires demo confirmation code"
+                >
+                  {isVerifyingSkipCode ? "Verifying code..." : "Skip to Final Test (Demo)"}
+                </button>
+              )}
               <button
                 className="button primary"
                 onClick={() => setViewMode("knowledge-check")}
