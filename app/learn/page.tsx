@@ -61,6 +61,209 @@ type Profile = {
   };
 };
 
+function getTrackConfig(track: PracticeTrack): TrackConfig {
+  return TRACK_CONFIGS.find((item) => item.track === track) ?? TRACK_CONFIGS[2];
+}
+
+function formatDuration(seconds: number): string {
+  const safe = Math.max(0, seconds);
+  const minutes = Math.floor(safe / 60);
+  const remaining = safe % 60;
+  return `${minutes}:${remaining.toString().padStart(2, "0")}`;
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function createBrowserSupabaseClient() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !supabaseAnonKey) {
+    throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY.");
+  }
+
+  return createClient(supabaseUrl, supabaseAnonKey);
+}
+
+async function ensureSupabaseAccessToken() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const supabase = createBrowserSupabaseClient();
+  const existingToken = window.localStorage.getItem(SUPABASE_TOKEN_STORAGE_KEY);
+  if (existingToken) {
+    const { data: userData, error: userError } = await supabase.auth.getUser(existingToken);
+    if (!userError && userData.user) {
+      return existingToken;
+    }
+
+    window.localStorage.removeItem(SUPABASE_TOKEN_STORAGE_KEY);
+  }
+
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError) {
+    throw new Error(sessionError.message);
+  }
+
+  const sessionToken = sessionData.session?.access_token ?? null;
+  if (sessionToken) {
+    window.localStorage.setItem(SUPABASE_TOKEN_STORAGE_KEY, sessionToken);
+    return sessionToken;
+  }
+
+  if (process.env.NODE_ENV === "production") {
+    return null;
+  }
+
+  const { data: anonymousData, error: anonymousError } = await supabase.auth.signInAnonymously();
+  if (anonymousError || !anonymousData.session?.access_token) {
+    throw new Error(
+      "Could not create a local Supabase session. Enable Anonymous sign-ins or sign in with a real user."
+    );
+  }
+
+  const token = anonymousData.session.access_token;
+  window.localStorage.setItem(SUPABASE_TOKEN_STORAGE_KEY, token);
+  return token;
+}
+
+function getOrCreateDevUserId() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const existing = window.localStorage.getItem(DEV_USER_ID_STORAGE_KEY);
+  if (existing && isUuid(existing)) {
+    return existing;
+  }
+
+  if (!window.crypto?.randomUUID) {
+    throw new Error("Cannot create local dev identity: browser does not support crypto.randomUUID().");
+  }
+
+  const userId = window.crypto.randomUUID();
+  window.localStorage.setItem(DEV_USER_ID_STORAGE_KEY, userId);
+  return userId;
+}
+
+async function buildAuthHeaders(): Promise<Record<string, string>> {
+  try {
+    const token = await ensureSupabaseAccessToken();
+    if (token) {
+      return {
+        Authorization: `Bearer ${token}`
+      };
+    }
+  } catch (error) {
+    if (process.env.NODE_ENV === "production") {
+      throw error;
+    }
+  }
+
+  const devUserId = getOrCreateDevUserId();
+  if (!devUserId) {
+    throw new Error("No authenticated Supabase session. Sign in before running assessment API calls.");
+  }
+
+  return {
+    "x-dev-user-id": devUserId
+  };
+}
+
+function runJavascriptPreview(submission: string, question: CodeQuestion): CodeCheckResult {
+  try {
+    const factory = new Function(
+      `${submission}\nreturn typeof ${question.function_name} === \"function\" ? ${question.function_name} : null;`
+    );
+    const candidate = factory();
+
+    if (typeof candidate !== "function") {
+      return {
+        passedCount: 0,
+        totalCount: question.visible_tests.length,
+        details: [
+          {
+            label: "function export",
+            passed: false,
+            message: `Could not find function ${question.function_name}(...) in submission.`
+          }
+        ]
+      };
+    }
+
+    let passedCount = 0;
+    const details = question.visible_tests.map((testCase) => {
+      try {
+        const output = candidate([...testCase.input]);
+        const passed = output === testCase.expected;
+        if (passed) {
+          passedCount += 1;
+        }
+
+        return {
+          label: testCase.label,
+          passed,
+          message: passed
+            ? `Passed (${String(output)})`
+            : `Expected ${String(testCase.expected)}, got ${String(output)}`
+        };
+      } catch (error) {
+        return {
+          label: testCase.label,
+          passed: false,
+          message: `Runtime error: ${(error as Error).message}`
+        };
+      }
+    });
+
+    return {
+      passedCount,
+      totalCount: question.visible_tests.length,
+      details
+    };
+  } catch (error) {
+    return {
+      passedCount: 0,
+      totalCount: question.visible_tests.length,
+      details: [
+        {
+          label: "compile",
+          passed: false,
+          message: `Code did not compile in preview checker: ${(error as Error).message}`
+        }
+      ]
+    };
+  }
+}
+
+function mapSubmitResponse(payload: AssessmentSubmitResponse): QuizResult {
+  return {
+    correctCount: payload.score.correct,
+    totalCount: payload.score.total,
+    percentage: payload.score.percentage,
+    reviewedItems: payload.reviewed_items.map((item) => ({
+      id: item.id,
+      prompt: item.prompt,
+      userResponse: item.user_response,
+      expected: item.expected,
+      isCorrect: item.is_correct,
+      explanation: item.explanation,
+      manualReviewRequired: Boolean(item.manual_review_required)
+    })),
+    sectionScores: payload.section_scores.map((section) => ({
+      label: section.label,
+      correct: section.correct,
+      total: section.total
+    })),
+    needsReview: payload.needs_review,
+    focusAreas: payload.focus_areas,
+    recommendations: payload.recommendations
+  };
+}
+
 export default function LearnPage() {
   const router = useRouter();
   const [status, setStatus] = useState<"loading" | "generating" | "ready" | "error">("loading");

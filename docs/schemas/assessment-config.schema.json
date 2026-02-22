@@ -1,0 +1,172 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AssessmentConfig",
+  "type": "object",
+  "required": ["assessment_profile", "resolved"],
+  "properties": {
+    "assessment_profile": {
+      "type": "object",
+      "required": [
+        "subject",
+        "practice_track",
+        "allowed_question_types",
+        "grading_rules",
+        "scoring_weights",
+        "ui_constraints"
+      ],
+      "properties": {
+        "subject": { "type": "string" },
+        "exam_name": { "type": ["string", "null"] },
+        "practice_track": {
+          "type": "string",
+          "enum": ["computer_science", "biology", "general"]
+        },
+        "allowed_question_types": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "enum": ["mcq", "short_answer", "open_ended", "code"]
+          }
+        },
+        "grading_rules": {
+          "type": "object",
+          "properties": {
+            "mcq": {
+              "type": "object",
+              "properties": {
+                "mode": { "type": "string", "enum": ["exact_match"] }
+              },
+              "additionalProperties": true
+            },
+            "written": {
+              "type": "object",
+              "properties": {
+                "mode": { "type": "string", "enum": ["keyword_rubric", "manual_review"] },
+                "minimum_keyword_hits": { "type": "integer", "minimum": 1 }
+              },
+              "additionalProperties": true
+            },
+            "code": {
+              "type": "object",
+              "properties": {
+                "mode": { "type": "string", "enum": ["test_runner"] },
+                "max_runtime_ms": { "type": "integer", "minimum": 100 },
+                "max_payload_bytes": { "type": "integer", "minimum": 1 }
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": true
+        },
+        "scoring_weights": {
+          "type": "object",
+          "properties": {
+            "mcq": { "type": "number", "minimum": 0 },
+            "short_answer": { "type": "number", "minimum": 0 },
+            "open_ended": { "type": "number", "minimum": 0 },
+            "code": { "type": "number", "minimum": 0 }
+          },
+          "additionalProperties": true
+        },
+        "ui_constraints": {
+          "type": "object",
+          "properties": {
+            "duration_seconds": { "type": "integer", "minimum": 60 },
+            "autosave_enabled": { "type": "boolean" },
+            "resume_enabled": { "type": "boolean" },
+            "timed_sections": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["id", "time_limit_seconds"],
+                "properties": {
+                  "id": { "type": "string" },
+                  "time_limit_seconds": { "type": ["integer", "null"], "minimum": 30 }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "lesson_override": {
+      "type": ["object", "null"],
+      "properties": {
+        "lesson_id": { "type": "string" },
+        "track_override": {
+          "type": "string",
+          "enum": ["computer_science", "biology", "general"]
+        },
+        "exam_name_override": { "type": ["string", "null"] },
+        "question_type_order": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["mcq", "short_answer", "open_ended", "code"]
+          }
+        },
+        "ui_constraints_override": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "resolved": {
+      "type": "object",
+      "required": [
+        "lesson_id",
+        "subject",
+        "practice_track",
+        "exam_style",
+        "duration_seconds",
+        "autosave_enabled",
+        "resume_enabled",
+        "allowed_question_types"
+      ],
+      "properties": {
+        "lesson_id": { "type": "string" },
+        "subject": { "type": "string" },
+        "exam_name": { "type": ["string", "null"] },
+        "practice_track": {
+          "type": "string",
+          "enum": ["computer_science", "biology", "general"]
+        },
+        "exam_style": { "type": "string" },
+        "duration_seconds": { "type": "integer", "minimum": 60 },
+        "autosave_enabled": { "type": "boolean" },
+        "resume_enabled": { "type": "boolean" },
+        "allowed_question_types": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["mcq", "short_answer", "open_ended", "code"]
+          }
+        },
+        "sections": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "title", "question_types", "time_limit_seconds"],
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string" },
+              "question_types": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": ["mcq", "short_answer", "open_ended", "code"]
+                }
+              },
+              "time_limit_seconds": { "type": ["integer", "null"], "minimum": 30 }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

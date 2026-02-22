@@ -158,7 +158,8 @@ export async function POST(request: Request) {
 
   console.log("[POST /api/profile] Saving profile for user:", resolvedUser.userId);
 
-  const useDevFallback = process.env.NODE_ENV !== "production" && !accessToken && Boolean(devUserId);
+  const useDevFallback =
+    process.env.NODE_ENV !== "production" && Boolean(devUserId) && resolvedUser.userId === devUserId;
   if (useDevFallback) {
     console.log("[POST /api/profile] Using dev fallback mode");
     const ensureUserError = await ensureDevAuthUserExists(resolvedUser.userId);
