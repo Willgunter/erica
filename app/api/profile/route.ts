@@ -154,7 +154,8 @@ export async function POST(request: Request) {
     ...normalized
   };
 
-  const useDevFallback = process.env.NODE_ENV !== "production" && !accessToken && Boolean(devUserId);
+  const useDevFallback =
+    process.env.NODE_ENV !== "production" && Boolean(devUserId) && resolvedUser.userId === devUserId;
   if (useDevFallback) {
     const ensureUserError = await ensureDevAuthUserExists(resolvedUser.userId);
     if (ensureUserError) {

@@ -39,6 +39,10 @@ export async function resolveUserId(
     const { data, error } = await supabase.auth.getUser(accessToken);
 
     if (error || !data.user) {
+      if (process.env.NODE_ENV !== "production" && devUserId && isUuid(devUserId)) {
+        return { userId: devUserId };
+      }
+
       return { error: "Unauthorized", status: 401 };
     }
 
