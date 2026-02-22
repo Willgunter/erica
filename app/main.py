@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any
 
@@ -28,6 +29,8 @@ from app.store import store
 
 
 def _create_service() -> LessonGenerationService:
+    level = os.getenv("APP_LOG_LEVEL", "INFO").upper()
+    logging.basicConfig(level=getattr(logging, level, logging.INFO))
     storage_root = os.environ.get("OBJECT_STORAGE_ROOT", "app/object_storage")
     storage = LocalObjectStorage(root_dir=storage_root)
     repository = InMemoryLessonRepository()

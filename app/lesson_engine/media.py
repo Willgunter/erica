@@ -11,8 +11,13 @@ from typing import Any
 import google.generativeai as genai
 from elevenlabs import ElevenLabs, VoiceSettings
 
+from ..gemini import init_gemini_model
 from .models import Profile
 from .storage import LocalObjectStorage
+
+import logging
+
+_logger = logging.getLogger(__name__)
 
 
 class MediaGenerator:
@@ -22,11 +27,12 @@ class MediaGenerator:
         self.storage = storage
         
         gemini_key = os.environ.get("GEMINI_API_KEY")
+        _logger.debug("[MediaGenerator] Initializing: has_gemini_key=%s", bool(gemini_key))
         if gemini_key:
-            genai.configure(api_key=gemini_key)
-            self.gemini_model = genai.GenerativeModel('gemini-1.5-flash')
+            self.gemini_model, _ = init_gemini_model(genai, gemini_key, _logger, "MediaGenerator")
         else:
             self.gemini_model = None
+            _logger.warning("[MediaGenerator] GEMINI_API_KEY missing; Gemini-powered visual/audio script generation disabled.")
         
         elevenlabs_key = os.environ.get("ELEVENLABS_API_KEY")
         if elevenlabs_key:
@@ -121,9 +127,11 @@ class MediaGenerator:
     def _generate_manim_script_with_ai(self, module: dict[str, Any], profile: Profile) -> str:
         """Generate an engaging Manim script using Gemini AI."""
         if not self.gemini_model:
+            _logger.debug("[MediaGenerator] generate_manim_script_with_ai using fallback for module=%s", module.get("module_id"))
             return self._manim_script_fallback(module, profile)
         
         try:
+            _logger.info("[MediaGenerator] Calling Gemini for manim script | module=%s title=%s", module.get("module_id"), module.get("title"))
             prompt = f"""
 You are creating an engaging educational animation script using Manim (Mathematical Animation Engine) for a visual learner.
 
@@ -147,6 +155,7 @@ Provide ONLY the Python code, no explanations. Start with 'from manim import *'.
             
             response = self.gemini_model.generate_content(prompt)
             script = response.text.strip()
+            _logger.debug("[MediaGenerator] Gemini manim response length=%d", len(script))
             
             if "```python" in script:
                 script = script.split("```python")[1].split("```")[0].strip()
@@ -155,7 +164,10 @@ Provide ONLY the Python code, no explanations. Start with 'from manim import *'.
             
             return script
         except Exception as e:
-            print(f"AI script generation failed: {e}")
+            _logger.exception("[MediaGenerator] AI script generation failed module=%s: %s", module.get("module_id"), e)
+            if "not found" in str(e).lower():
+                self.gemini_model = None
+                _logger.warning("[MediaGenerator] Disabled Gemini model after NotFound; set GEMINI_MODEL to a valid value.")
             return self._manim_script_fallback(module, profile)
     
     def _manim_script_fallback(self, module: dict[str, Any], profile: Profile) -> str:
@@ -212,9 +224,11 @@ Provide ONLY the Python code, no explanations. Start with 'from manim import *'.
     def _generate_podcast_script_with_ai(self, module: dict[str, Any], profile: Profile) -> dict[str, Any]:
         """Generate engaging podcast-style narration using Gemini AI."""
         if not self.gemini_model:
+            _logger.debug("[MediaGenerator] generate_podcast_script_with_ai using fallback for module=%s", module.get("module_id"))
             return self._podcast_script_fallback(module, profile)
         
         try:
+            _logger.info("[MediaGenerator] Calling Gemini for podcast narration | module=%s title=%s", module.get("module_id"), module.get("title"))
             prompt = f"""
 You are creating an engaging educational podcast script for an auditory learner.
 
@@ -239,6 +253,7 @@ Provide ONLY the narration text, as if you're speaking directly to the learner.
             
             response = self.gemini_model.generate_content(prompt)
             narration = response.text.strip()
+            _logger.debug("[MediaGenerator] Gemini podcast response length=%d", len(narration))
             
             return {
                 "title": module["title"],
@@ -247,7 +262,10 @@ Provide ONLY the narration text, as if you're speaking directly to the learner.
                 "estimated_duration": module["estimated_minutes"] * 60
             }
         except Exception as e:
-            print(f"AI podcast script generation failed: {e}")
+            _logger.exception("[MediaGenerator] AI podcast script generation failed module=%s: %s", module.get("module_id"), e)
+            if "not found" in str(e).lower():
+                self.gemini_model = None
+                _logger.warning("[MediaGenerator] Disabled Gemini model after NotFound; set GEMINI_MODEL to a valid value.")
             return self._podcast_script_fallback(module, profile)
     
     def _podcast_script_fallback(self, module: dict[str, Any], profile: Profile) -> dict[str, Any]:

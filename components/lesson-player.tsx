@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { KnowledgeCheck } from "./knowledge-check";
 
@@ -70,8 +70,30 @@ function FlashcardDeck({ cards }: { cards: Flashcard[] }) {
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [mastered, setMastered] = useState<Set<number>>(new Set());
+  const safeCards = (cards || []).filter(
+    (card): card is Flashcard =>
+      Boolean(
+        card &&
+          typeof card.front === "string" &&
+          typeof card.back === "string" &&
+          (card.front.trim() || card.back.trim()),
+      ),
+  );
 
-  if (!cards || cards.length === 0) {
+  useEffect(() => {
+    setIndex(0);
+    setFlipped(false);
+    setMastered(new Set());
+  }, [safeCards.length]);
+
+  useEffect(() => {
+    if (safeCards.length > 0 && index >= safeCards.length) {
+      setIndex(0);
+      setFlipped(false);
+    }
+  }, [index, safeCards.length]);
+
+  if (safeCards.length === 0) {
     return (
       <div style={{ textAlign: "center", padding: "2rem", color: "var(--ink-soft)" }}>
         No flashcards for this module yet.
@@ -79,23 +101,23 @@ function FlashcardDeck({ cards }: { cards: Flashcard[] }) {
     );
   }
 
-  const card = cards[index];
+  const card = safeCards[index] || safeCards[0];
 
   const handleNext = (didMaster: boolean) => {
     if (didMaster) setMastered((prev) => new Set([...prev, index]));
     setFlipped(false);
-    setTimeout(() => setIndex((i) => (i + 1) % cards.length), 120);
+    setTimeout(() => setIndex((i) => (i + 1) % safeCards.length), 120);
   };
 
   const handlePrev = () => {
     setFlipped(false);
-    setTimeout(() => setIndex((i) => (i - 1 + cards.length) % cards.length), 120);
+    setTimeout(() => setIndex((i) => (i - 1 + safeCards.length) % safeCards.length), 120);
   };
 
   return (
     <div className="flashcard-deck">
       <div className="flashcard-meta">
-        <span>{index + 1} / {cards.length}</span>
+        <span>{index + 1} / {safeCards.length}</span>
         <span>{mastered.size} mastered</span>
       </div>
 
@@ -142,7 +164,7 @@ function FlashcardDeck({ cards }: { cards: Flashcard[] }) {
       <div className="flashcard-progress-track">
         <div
           className="flashcard-progress-fill"
-          style={{ width: `${(mastered.size / cards.length) * 100}%` }}
+          style={{ width: `${(mastered.size / safeCards.length) * 100}%` }}
         />
       </div>
     </div>
@@ -362,7 +384,7 @@ export function LessonPlayer({ lesson, profile }: LessonPlayerProps) {
           <>
             <div className="content-main">
               {learningMode === "flashcards" && (
-                <FlashcardDeck cards={currentModule?.flashcards || []} />
+                <FlashcardDeck key={currentModule?.module_id || "no-module"} cards={currentModule?.flashcards || []} />
               )}
 
               {learningMode === "concept" && currentModule && (

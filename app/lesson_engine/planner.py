@@ -1,12 +1,25 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import uuid
 from typing import Any
 
+from ..gemini import init_gemini_model
 from .models import ContentChunk, Profile
+
+
+_logger = logging.getLogger(__name__)
+
+
+def _mask_key(value: str | None) -> str:
+    if not value:
+        return "missing"
+    if len(value) <= 8:
+        return "***"
+    return f"{value[:4]}...{value[-4:]}"
 
 
 # ─── helpers ─────────────────────────────────────────────────────────────────
@@ -25,11 +38,13 @@ def _init_gemini():
     try:
         import google.generativeai as genai
         api_key = os.environ.get("GEMINI_API_KEY", "")
+        _logger.debug("[Planner] Initializing Gemini: has_api_key=%s key=%s", bool(api_key), _mask_key(api_key))
         if api_key:
-            genai.configure(api_key=api_key)
-            return genai.GenerativeModel("gemini-1.5-flash")
-    except Exception:
-        pass
+            model, _ = init_gemini_model(genai, api_key, _logger, "Planner")
+            return model
+        _logger.warning("[Planner] GEMINI_API_KEY is missing; planner will use fallback modules.")
+    except Exception as e:
+        _logger.exception("[Planner] Gemini initialization failed: %s", e)
     return None
 
 
@@ -62,12 +77,24 @@ class LessonPlanner:
 
     def _analyze_with_gemini(self, full_text: str, profile: Profile) -> list[dict]:
         """Use Gemini to extract structured learning modules from raw content."""
+        _logger.info(
+            "[Planner] Gemini analysis invoked | subject=%s | chars=%d | model_ready=%s",
+            profile.subject,
+            len(full_text),
+            bool(self.gemini_model),
+        )
         if not self.gemini_model:
+            _logger.debug("[Planner] Gemini unavailable; using fallback analysis for subject=%s", profile.subject)
             return self._fallback_analysis(full_text, profile)
 
         try:
             text_sample = full_text[:20000]
-            print(f"[Planner] Analyzing {len(full_text)} chars of content (using {len(text_sample)} chars)")
+            _logger.info(
+                "[Planner] Sending Gemini request with sample_chars=%d (total=%d) goals=%d",
+                len(text_sample),
+                len(full_text),
+                len(profile.goals),
+            )
             prompt = f"""You are an expert educational AI analyzing study material for a student.
 
 Subject: {profile.subject}
@@ -102,6 +129,11 @@ Return ONLY valid JSON with NO markdown fences, NO extra text:
 
             response = self.gemini_model.generate_content(prompt)
             text = response.text.strip()
+            _logger.debug(
+                "[Planner] Gemini response raw_length=%d prefix=%r",
+                len(text),
+                text[:120].replace("\n", " "),
+            )
 
             if "```json" in text:
                 text = text.split("```json")[1].split("```")[0].strip()
@@ -111,19 +143,30 @@ Return ONLY valid JSON with NO markdown fences, NO extra text:
             parsed = json.loads(text)
             modules = parsed.get("modules", [])
             if modules:
-                print(f"[Planner] Successfully generated {len(modules)} modules with Gemini")
+                _logger.info("[Planner] Gemini returned %d modules for subject=%s", len(modules), profile.subject)
                 for i, mod in enumerate(modules, 1):
                     fc_count = len(mod.get("flashcards", []))
                     eq_count = len(mod.get("exam_questions", []))
-                    print(f"  Module {i}: {mod.get('title', 'Untitled')} - {fc_count} flashcards, {eq_count} exam questions")
+                    _logger.debug(
+                        "[Planner] Module %d: title=%s flashcards=%d exam_questions=%d",
+                        i,
+                        mod.get("title", "Untitled"),
+                        fc_count,
+                        eq_count,
+                    )
                 return modules
         except Exception as e:
-            print(f"[Planner] Gemini analysis failed: {e}")
+            _logger.exception("[Planner] Gemini analysis failed: %s", e)
+            if "not found" in str(e).lower():
+                self.gemini_model = None
+                _logger.warning("[Planner] Disabled Gemini model after NotFound; set GEMINI_MODEL to a valid value.")
+            _logger.warning("[Planner] Falling back to heuristic analysis for subject=%s", profile.subject)
 
         return self._fallback_analysis(full_text, profile)
 
     def _fallback_analysis(self, full_text: str, profile: Profile) -> list[dict]:
         """Simple fallback when Gemini is unavailable."""
+        _logger.warning("[Planner] Fallback analysis running for subject=%s", profile.subject)
         words = full_text.split()
         chunk_size = max(200, len(words) // 4)
         segments = []
