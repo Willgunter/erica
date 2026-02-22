@@ -39,19 +39,12 @@ export async function resolveUserId(
     const { data, error } = await supabase.auth.getUser(accessToken);
 
     if (error || !data.user) {
-<<<<<<< HEAD
       if (process.env.NODE_ENV !== "production" && devUserId) {
         if (!isUuid(devUserId)) {
           return { error: "Invalid x-dev-user-id header (expected UUID).", status: 400 };
         }
         return { userId: devUserId };
       }
-=======
-      if (process.env.NODE_ENV !== "production" && devUserId && isUuid(devUserId)) {
-        return { userId: devUserId };
-      }
-
->>>>>>> 93131f24abaea8d88983d5e3d960333a62937fca
       return { error: "Unauthorized", status: 401 };
     }
 
