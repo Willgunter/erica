@@ -167,11 +167,11 @@ export default function UploadPage() {
     }
   };
 
-  const canProceed = files.length > 0 || topics.length > 0;
+  const canProceed = topics.length > 0;
 
   const handleContinue = async () => {
     if (!canProceed) {
-      setError("Add at least one file or topic before continuing.");
+      setError("Add at least one topic before continuing.");
       return;
     }
 
